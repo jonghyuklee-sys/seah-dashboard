@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>세아씨엠 결로 방지 모니터링 시스템</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Google Fonts: Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="container">
+        <header class="main-header">
+            <div class="header-left">
+                <div class="brand-box">
+                    <span class="brand-seah">SeAH</span>
+                    <span class="brand-cm">Coated Metal</span>
+                </div>
+                <div class="header-v-divider"></div>
+                <h1>결로 지수 모니터링 시스템</h1>
+            </div>
+
+            <div class="header-right">
+                <nav class="header-nav">
+                    <button id="nav-dashboard" class="btn-nav active" onclick="toggleView('dashboard')">대시보드</button>
+                    <button id="nav-forecast" class="btn-nav" onclick="toggleView('forecast')">주간 예측 ↗</button>
+                    <button id="setting-btn" class="btn-nav" onclick="openSettingModal()"
+                        style="padding: 5px 10px;">⚙️</button>
+                </nav>
+                <div id="current-time">2024-01-07 13:00</div>
+            </div>
+        </header>
+
+        <!-- ... -->
+
+    </div>
+
+    <!-- Setting Modal -->
+    <div id="setting-modal" class="modal">
+        <div class="modal-content setting-modal-content">
+            <div class="modal-header">
+                <h2>환경 설정</h2>
+                <span class="close-btn" onclick="closeSettingModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="setting-group">
+                    <label for="kma-api-key">기상청 API 키 (Decoding Key)</label>
+                    <input type="text" id="kma-api-key" placeholder="공공데이터포털에서 발급받은 인증키를 입력하세요">
+                    <small class="text-muted">입력하지 않으면 데모(Mock) 데이터가 사용됩니다. <br>API 키는 브라우저에 안전하게 저장됩니다.</small>
+                </div>
+                <div class="setting-actions">
+                    <button class="btn-primary" onclick="saveSettings()">저장</button>
+                    <button class="btn-secondary" onclick="closeSettingModal()">취소</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    </header>
+
+    <div id="dashboard-view" class="view-content active">
+        <section class="dashboard-grid">
+            <!-- 1단 (왼쪽): 입력 섹션 -->
+            <div class="column side-left">
+                <div class="card input-card">
+                    <h3>환경 데이터 입력</h3>
+                    <div class="input-grid">
+                        <div class="input-group">
+                            <label for="report-date">점검 일자</label>
+                            <input type="date" id="report-date">
+                        </div>
+                        <div class="input-group">
+                            <label for="report-time">점검 시간</label>
+                            <select id="report-time">
+                                <option value="07:00">07:00</option>
+                                <option value="15:00">15:00</option>
+                                <option value="실시간">실시간</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label for="location-select">모니터링 위치</label>
+                        <select id="location-select">
+                            <option value="CGL 제품창고">CGL 제품창고</option>
+                            <option value="1CCL 원자재동">1CCL 원자재동</option>
+                            <option value="1CCL 제품창고">1CCL 제품창고</option>
+                            <option value="2CCL 원자재동">2CCL 원자재동</option>
+                            <option value="2CCL 제품창고">2CCL 제품창고</option>
+                            <option value="3CCL 원자재동">3CCL 원자재동</option>
+                            <option value="3CCL 제품창고">3CCL 제품창고</option>
+                            <option value="SSCL 제품창고">SSCL 제품창고</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label for="steel-temp-input">강판 온도 (°C)</label>
+                        <input type="number" id="steel-temp-input" step="0.1" placeholder="18.0">
+                    </div>
+                    <div class="input-group">
+                        <label for="temp-input">실내 온도 (°C)</label>
+                        <input type="number" id="temp-input" step="0.1" placeholder="20.5">
+                    </div>
+                    <div class="input-group">
+                        <label for="humidity-input">실내 습도 (%)</label>
+                        <input type="number" id="humidity-input" step="1" placeholder="65">
+                    </div>
+                    <button id="calculate-btn" class="btn-primary">실시간 결로 분석하기</button>
+                </div>
+
+                <div class="card metrics-card mt-md">
+                    <h3>상세 분석 지표</h3>
+                    <div class="metric-item">
+                        <span>이슬점 (DP)</span>
+                        <strong id="dew-point-val">--°C</strong>
+                    </div>
+                    <div class="metric-item">
+                        <span>임계 온도차</span>
+                        <strong id="temp-diff-val">--°C</strong>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2단 (중앙): 현황 및 요약 -->
+            <div class="column main-content">
+                <div class="grid-2-col">
+                    <div class="card status-card" id="risk-indicator">
+                        <h3>현재 결로 위험도</h3>
+                        <div class="status-value" id="status-text">데이터 부족</div>
+                        <p id="risk-reason-text" class="status-reason">데이터 입력 후 분석해주세요.</p>
+                    </div>
+
+                    <div class="card weather-card">
+                        <h3>날씨정보</h3>
+                        <div class="weather-horizontal-wrap">
+                            <div class="weather-main">
+                                <div class="weather-value" id="outdoor-temp">--°C</div>
+                                <p class="weather-loc">군산 세아씨엠</p>
+                            </div>
+                            <div class="weather-forecast-grid">
+                                <div class="forecast-item">
+                                    <span class="f-label">오전</span>
+                                    <div class="f-data">
+                                        <span class="f-sub-label">강수:</span>
+                                        <strong id="weather-am-rain">--</strong>
+                                    </div>
+                                    <div class="f-data">
+                                        <span class="f-sub-label">확률:</span>
+                                        <span class="f-prob" id="weather-am-prob">--%</span>
+                                    </div>
+                                </div>
+                                <div class="forecast-item">
+                                    <span class="f-label">오후</span>
+                                    <div class="f-data">
+                                        <span class="f-sub-label">강수:</span>
+                                        <strong id="weather-pm-rain">--</strong>
+                                    </div>
+                                    <div class="f-data">
+                                        <span class="f-sub-label">확률:</span>
+                                        <span class="f-prob" id="weather-pm-prob">--%</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card location-summary-card mt-md">
+                    <h3>위치별 최신 현황</h3>
+                    <div id="location-status-list" class="status-list">
+                        <!-- JavaScript에서 렌더링됨 -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3단 (오른족): 보고 및 지표 -->
+            <div class="column side-right">
+                <div class="card report-status-card">
+                    <div class="report-status-header">
+                        <h3>정기 점검 현황</h3>
+                        <input type="date" id="status-inspection-date" class="status-date-input">
+                    </div>
+                    <div class="report-slots">
+                        <div class="report-slot" id="slot-0700">
+                            <span class="slot-time">07:00</span>
+                            <span class="slot-status">미등록</span>
+                            <div class="slot-actions">
+                                <button id="edit-btn-0700" class="btn-mini btn-primary-mini">기록</button>
+                                <button id="view-btn-0700" class="btn-mini btn-secondary-mini" disabled>조회</button>
+                            </div>
+                        </div>
+                        <div class="report-slot" id="slot-1500">
+                            <span class="slot-time">15:00</span>
+                            <span class="slot-status">미등록</span>
+                            <div class="slot-actions">
+                                <button id="edit-btn-1500" class="btn-mini btn-primary-mini">기록</button>
+                                <button id="view-btn-1500" class="btn-mini btn-secondary-mini" disabled>조회</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+
+                <div class="card history-card mt-md">
+                    <div class="card-header-column">
+                        <h3>점검 기록 히스토리</h3>
+                        <div class="calendar-nav">
+                            <button onclick="changeMonth(-1)" class="btn-cal-nav">&lt;</button>
+                            <span id="calendar-month-year">2024년 1월</span>
+                            <button onclick="changeMonth(1)" class="btn-cal-nav">&gt;</button>
+                        </div>
+                    </div>
+                    <div id="calendar-container" class="calendar-container">
+                        <!-- JS에서 동적 생성 -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 로그 테이블 -->
+        <div class="log-section">
+            <div class="card">
+                <div class="log-header">
+                    <h3>모니터링 로그 (최근 5건)</h3>
+                    <div class="header-btns">
+                        <button id="view-all-logs-btn" class="btn-mini" onclick="viewAllLogs()">전체보기</button>
+                        <button id="clear-log-btn" class="btn-mini btn-danger">기록 삭제</button>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>일시</th>
+                                <th>위치</th>
+                                <th>강판온도</th>
+                                <th>실내 온/습도</th>
+                                <th>실외기온</th>
+                                <th>이슬점</th>
+                                <th>상태</th>
+                            </tr>
+                        </thead>
+                        <tbody id="log-body">
+                            <!-- Logs populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- NEW: Full Log History Modal -->
+        <div id="log-modal" class="modal">
+            <div class="modal-content full-modal">
+                <div class="modal-header">
+                    <h2 id="log-modal-title">전체 모니터링 로그 분석</h2>
+                    <span class="close-btn" onclick="closeLogModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>일시</th>
+                                    <th>위치</th>
+                                    <th>강판온도</th>
+                                    <th>실내 온/습도</th>
+                                    <th>실외기온</th>
+                                    <th>이슬점</th>
+                                    <th>상태</th>
+                                </tr>
+                            </thead>
+                            <tbody id="full-log-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Report Details Modal -->
+        <div id="report-modal" class="modal">
+            <div class="modal-content full-modal">
+                <div class="modal-header">
+                    <h2 id="modal-title">점검 상세 기록</h2>
+                    <span class="close-btn" onclick="closeModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>위치</th>
+                                    <th>시간</th>
+                                    <th>환경 (강판/이슬점)</th>
+                                    <th>GATE</th>
+                                    <th>포장</th>
+                                    <th>제품상태</th>
+                                    <th>위험도</th>
+                                </tr>
+                            </thead>
+                            <tbody id="modal-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    </div>
+    </div>
+
+    <div id="forecast-view" class="view-content">
+        <section class="forecast-container">
+            <div class="forecast-header">
+                <h2>차주 결로 발생 예측 (7일 예시)</h2>
+                <p class="text-muted">기상청 중기 예보 및 군산 세아씨엠 지역 데이터를 기반으로 한 AI 예측 모델입니다.</p>
+            </div>
+
+            <div class="forecast-summary-card card mt-md">
+                <div class="summary-icon">💡</div>
+                <div class="summary-text">
+                    <h4>주간 관리 가이드</h4>
+                    <p id="weekly-management-guide">데이터를 분석 중입니다...</p>
+                </div>
+            </div>
+
+            <div id="weekly-forecast-grid" class="weekly-forecast-grid mt-lg">
+                <!-- JS에서 7일간의 예측 카드를 생성합니다 -->
+            </div>
+
+            <div class="equipment-guide-card card mt-lg">
+                <h4>🛠️ 설비 가동 기준 안내</h4>
+                <div class="guide-grid">
+                    <div class="guide-item guide-heater">
+                        <div class="guide-header">
+                            <span class="guide-icon">🔥</span>
+                            <strong>열풍기 (결로 방지)</strong>
+                        </div>
+                        <p class="guide-condition">일 평균 기온 <strong>5℃ 이하</strong></p>
+                        <small>목적: 강판 과냉각 방지</small>
+                    </div>
+                    <div class="guide-item guide-fan">
+                        <div class="guide-header">
+                            <span class="guide-icon">🌀</span>
+                            <strong>배풍기 (환기)</strong>
+                        </div>
+                        <p class="guide-condition">강수확률 <strong>30% 이하</strong><br>& 기온 <strong>5~15℃</strong></p>
+                        <small>목적: 낮은 습도로 환기</small>
+                    </div>
+                    <div class="guide-item guide-stop">
+                        <div class="guide-header">
+                            <span class="guide-icon">⛔</span>
+                            <strong>가동 정지</strong>
+                        </div>
+                        <p class="guide-condition">비가 오거나(>30%)<br>기온이 높을 때(>15℃)</p>
+                        <small>목적: 외부 습기 유입 차단</small>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+    </div>
+
+    <!-- Firebase SDK (호환 버전) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-analytics-compat.js"></script>
+
+    <script>
+        // 이미지에서 확인된 사용자님의 설정값입니다.
+        const firebaseConfig = {
+            apiKey: "AIzaSyAt26JyW_MNzjO33K3BPX4pPRGUAUH2occ",
+            authDomain: "seahcm-dashboard.firebaseapp.com",
+            databaseURL: "https://seahcm-dashboard-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "seahcm-dashboard",
+            storageBucket: "seahcm-dashboard.firebasestorage.app",
+            messagingSenderId: "892539664890",
+            appId: "1:892539664890:web:0a0a9275615175ba504c43",
+            measurementId: "G-Y1CQHT81G9"
+        };
+
+        // Firebase 시작하기
+        firebase.initializeApp(firebaseConfig);
+        firebase.analytics();
+    </script>
+
+    <!-- 앱 로직 실행 -->
+    <script src="app.js"></script>
+</body>
+
+</html>
