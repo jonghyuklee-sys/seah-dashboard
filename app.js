@@ -22,10 +22,10 @@ let lastResetDate = localStorage.getItem('seah_last_reset_date') || "";
 let currentCalendarDate = new Date();
 let isAdmin = sessionStorage.getItem('seah_is_admin') === 'true'; // 관리자 세션 유지
 let cachedForecast = null; // 전역 캐시 변수
-let kmaApiKey = ""; // Firebase에서 가져올 API 키
 
-// 기상청 API 키 (제공해주신 키로 업데이트됨)
-const KMA_FIXED_KEY = "b1e8a3cd4d8e225f27ee1b04f5ea8175d3afbaeac216a2158087681991c48a4b";
+// 기상청 API 키 - Firebase에서만 관리 (보안 강화)
+let kmaShortApiKey = ""; // 단기예보 API 키
+let kmaMidApiKey = ""; // 중기예보 API 키
 
 // ========== 3. DOM 요소 참조 ==========
 const elements = {
@@ -178,7 +178,8 @@ function updateLocationStatus(location, steel, dp, risk, gate, pack, product) {
         gate: gate || '닫힘',
         pack: pack || '포장',
         product: product || '양호',
-        time: new Date().toLocaleTimeString()
+        time: new Date().toLocaleTimeString(),
+        dateStr: getLocalDateString() // 오늘 날짜 저장 (중복 확인용)
     };
 
     // Firebase 동기화
@@ -436,19 +437,17 @@ async function requestKma(url) {
 // ========== 10. 실시간 날씨 연동 (Dashboard) ==========
 async function updateWeatherData() {
     console.log('=== 실시간 날씨 업데이트 시작 ===');
-    // Firebase에서 가져온 키 우선 사용, 없으면 고정 키 사용
-    const API_KEY = kmaApiKey || KMA_FIXED_KEY;
-    const nx = 56, ny = 128; // 군산 세아씨엠 (소룡동) 격자 좌표 최적화
+    // Firebase에서 가져온 단기예보 키 사용
+    const API_KEY = kmaShortApiKey;
+    const nx = 56, ny = 92; // 군산 세아씨엠 (소룡동) 격자 좌표 최적화
 
-    // 키가 없거나 MOCK_KEY인 경우 데모 데이터 표시
-    if (!API_KEY || API_KEY === 'MOCK_KEY' || API_KEY.length < 10) {
-        console.log('API 키가 유효하지 않아 데모 데이터를 사용합니다.');
-        const hours = new Date().getHours();
-        const mockTemp = (5 + Math.cos((hours - 14) * Math.PI / 12) * 5).toFixed(1);
-        if (elements.outdoorTemp) elements.outdoorTemp.textContent = `${mockTemp}°C`;
-        if (elements.weatherAmProb) elements.weatherAmProb.textContent = `20%`;
-        if (elements.weatherPmProb) elements.weatherPmProb.textContent = `40%`;
-        return parseFloat(mockTemp);
+    // 키가 없는 경우 데모 데이터 표시
+    if (!API_KEY || API_KEY.length < 10) {
+        console.warn('단기예보 API 키가 없거나 로드 중입니다.');
+        if (elements.outdoorTemp) elements.outdoorTemp.textContent = '--°C';
+        if (elements.weatherAmProb) elements.weatherAmProb.textContent = `--%`;
+        if (elements.weatherPmProb) elements.weatherPmProb.textContent = `--%`;
+        return null;
     }
 
     try {
@@ -507,6 +506,13 @@ async function updateWeatherData() {
             if (tempItem) {
                 currentTemp = parseFloat(tempItem.obsrValue);
                 if (elements.outdoorTemp) elements.outdoorTemp.textContent = `${currentTemp}°C`;
+
+                // 실외 온도 입력 필드 자동 업데이트 (사용자가 입력 중이 아닐 때만)
+                const outdoorInput = document.getElementById('outdoor-temp-input');
+                if (outdoorInput && document.activeElement !== outdoorInput) {
+                    outdoorInput.value = currentTemp;
+                }
+
                 console.log('현재 기온 업데이트 완료:', currentTemp);
             }
         } else {
@@ -865,23 +871,128 @@ function renderHistory() {
 function toggleView(view) {
     const dashboardView = document.getElementById('dashboard-view');
     const forecastView = document.getElementById('forecast-view');
+    const historyView = document.getElementById('history-view');
+
     const navDashboard = document.getElementById('nav-dashboard');
     const navForecast = document.getElementById('nav-forecast');
+    const navHistory = document.getElementById('nav-history');
 
-    if (!dashboardView || !forecastView) return;
+    // 뷰 초기화
+    if (dashboardView) dashboardView.classList.remove('active');
+    if (forecastView) forecastView.classList.remove('active');
+    if (historyView) historyView.classList.remove('active');
 
+    if (navDashboard) navDashboard.classList.remove('active');
+    if (navForecast) navForecast.classList.remove('active');
+    if (navHistory) navHistory.classList.remove('active');
+
+    // 선택된 뷰 활성화
     if (view === 'dashboard') {
-        dashboardView.classList.add('active');
-        forecastView.classList.remove('active');
+        if (dashboardView) dashboardView.classList.add('active');
         if (navDashboard) navDashboard.classList.add('active');
-        if (navForecast) navForecast.classList.remove('active');
-    } else {
-        dashboardView.classList.remove('active');
-        forecastView.classList.add('active');
-        if (navDashboard) navDashboard.classList.remove('active');
+    } else if (view === 'forecast') {
+        if (forecastView) forecastView.classList.add('active');
         if (navForecast) navForecast.classList.add('active');
         updateWeeklyForecast();
+    } else if (view === 'history') {
+        if (historyView) historyView.classList.add('active');
+        if (navHistory) navHistory.classList.add('active');
+        updateCondensationHistory();
     }
+}
+
+function updateCondensationHistory() {
+    const tbody = document.getElementById('history-log-body');
+    const msg = document.getElementById('history-message');
+    if (!tbody) return;
+
+    tbody.innerHTML = '';
+    if (msg) {
+        msg.textContent = '데이터를 분석 중입니다...';
+        msg.style.display = 'block';
+    }
+
+    setTimeout(() => {
+        const historyData = [];
+
+        // 1. 모니터링 로그(monitoringLogs)에서 '수동 입력(manual_history)'된 항목만 추출
+        // (단순 위험 수치 도달 건은 관리자가 실제 발생여부를 확인한 것이 아니므로 제외)
+        if (monitoringLogs && monitoringLogs.length > 0) {
+            monitoringLogs.forEach(log => {
+                // 관리자가 직접 입력한 'manual_history'만 포함
+                if (log.source === 'manual_history') {
+                    historyData.push({
+                        dateStr: log.time, // YYYY-MM-DD HH:MM
+                        location: log.location,
+                        outTemp: log.outdoor || '-',
+                        inTemp: log.temp,
+                        inHumid: log.humidity,
+                        dewPoint: log.dp,
+                        steelTemp: log.steel,
+                        diff: log.tempDiff !== undefined ? log.tempDiff : '-',
+                        reason: log.riskReason || '관리자 등록 이력'
+                    });
+                }
+            });
+        }
+
+        // 2. allReports에서 '결로 인지' 제품 상태 추출 (snapshot)
+        if (allReports) {
+            Object.keys(allReports).forEach(date => {
+                const dayReport = allReports[date];
+                Object.keys(dayReport).forEach(slotKey => {
+                    const report = dayReport[slotKey];
+                    if (report && report.snapshot) {
+                        Object.keys(report.snapshot).forEach(loc => {
+                            const snap = report.snapshot[loc];
+                            if (snap.product === '결로 인지') {
+                                // 현재 목록에 중복된 시간대/위치가 있는지 확인 (로그 vs 리포트 중복 방지)
+                                // 간단히 날짜+위치로 식별하되, 여기선 단순 추가
+                                historyData.push({
+                                    dateStr: `${date} ${report.slot || '00:00'}`,
+                                    location: loc,
+                                    outTemp: report.outdoor || '-',
+                                    inTemp: '-',
+                                    inHumid: '-',
+                                    dewPoint: snap.dp || '-',
+                                    steelTemp: snap.steel || '-',
+                                    diff: '-',
+                                    reason: '관리자 육안 식별(결로 인지)'
+                                });
+                            }
+                        });
+                    }
+                });
+            });
+        }
+
+        // 날짜 내림차순 정렬
+        historyData.sort((a, b) => {
+            const dateA = new Date(a.dateStr.replace(' ', 'T'));
+            const dateB = new Date(b.dateStr.replace(' ', 'T'));
+            return dateB - dateA;
+        });
+
+        // 렌더링
+        if (historyData.length === 0) {
+            if (msg) msg.textContent = '저장된 결로 발생 이력이 없습니다.';
+        } else {
+            if (msg) msg.style.display = 'none';
+            tbody.innerHTML = historyData.map(item => `
+                <tr>
+                    <td>${item.dateStr}</td>
+                    <td>${item.location}</td>
+                    <td>${item.outTemp}</td>
+                    <td>${item.inTemp}</td>
+                    <td>${item.inHumid}</td>
+                    <td>${item.dewPoint}</td>
+                    <td>${item.steelTemp}</td>
+                    <td>${item.diff}</td>
+                    <td><span class="status-danger" style="font-size: 0.8em; padding: 2px 5px; border-radius: 4px;">${item.reason}</span></td>
+                </tr>
+            `).join('');
+        }
+    }, 500); // 0.5초 딜레이 (로딩 효과)
 }
 
 // 배풍기/열풍기 가동 판단 및 결로 위험도 평가 함수
@@ -897,23 +1008,55 @@ function determineFanHeaterOperation(minTemp, maxTemp, amRainProb, pmRainProb) {
         reason: '정상 범위'
     };
 
-    // 1. 열풍기 가동 조건: 평균 기온 5도 이하 (저온으로 인한 강판 과냉각 위험)
-    if (avgTemp <= 5) {
+    const tempDiff = maxTemp - minTemp;
+
+    // 1. 열풍기 가동 (High Risk): 결로가 "심할 것"으로 예상 (영하권 또는 큰 일교차+강우)
+    if (minTemp <= -2 || (tempDiff >= 12 && maxRainProb >= 60)) {
         status.heater = true;
-        status.risk = '주의';
-        status.reason = '저온으로 인한 결로 위험 (열풍기 가동 권장)';
+        status.risk = '위험';
+        status.reason = '심각한 결로 위험 예상 (열풍기 가동)';
     }
-
-    // 2. 배풍기 가동 조건: 강수확률 30% 이하 & 기온 5~15도 (환기 가능 조건)
-    else if (maxRainProb <= 30 && avgTemp > 5 && avgTemp <= 15) {
+    // 2. 배풍기 가동 (Moderate Risk): 결로가 "발생될 것" 같은 경우 (일교차 또는 다습)
+    else if (tempDiff >= 8 || maxRainProb >= 40) {
         status.fan = true;
-        status.reason = '환기 권장 (낮은 강수확률)';
+        status.risk = '주의';
+        status.reason = '결로 발생 우려 (배풍기 가동)';
     }
 
-    // 3. 결로 주의 조건 보완: 강수확률이 높거나 습도가 높을 것으로 예상되는 경우
-    if (maxRainProb > 50) {
-        status.risk = '주의';
-        status.reason = '높은 강수 확률로 인한 습도 상승 주의';
+    // 4. 결로 발생 이력 기반 예측 (빅데이터 분석)
+    if (typeof monitoringLogs !== 'undefined' && monitoringLogs.length > 0) {
+        let matchCount = 0;
+        // 최근 이력부터 검사 (성능을 위해 최신 100건만)
+        const recentLogs = monitoringLogs.slice(0, 100);
+
+        recentLogs.forEach(log => {
+            // 단순 위험 수치 도달이 아닌, 관리자가 등록한 이력(manual_history)만 참조
+            if (log.source === 'manual_history' && log.outdoor !== undefined) {
+                const pastTemp = parseFloat(log.outdoor);
+                if (!isNaN(pastTemp)) {
+                    // 과거 결로 발생 시 외기온도가 예보 범위(최저~최고)에 포함되는지 확인 (오차범위 ±1도)
+                    if (pastTemp >= minTemp - 1 && pastTemp <= maxTemp + 1) {
+                        matchCount++;
+                    }
+                }
+            }
+        });
+
+        if (matchCount > 0) {
+            // 과거 이력이 있으면 최소 '주의' 단계로 격상
+            if (status.risk === '안전') {
+                status.risk = '주의';
+                status.reason = `과거 유사 기온 조건에서 결로 이력(${matchCount}건) 확인됨`;
+            } else {
+                // 이미 주의/위험인 경우 사유 추가
+                if (!status.reason.includes('과거 이력')) {
+                    status.reason += ` (과거 이력 ${matchCount}건 확인)`;
+                }
+            }
+
+            // 예방 차원에서 배풍기 가동 권장
+            status.fan = true;
+        }
     }
 
     return status;
@@ -935,7 +1078,20 @@ function setupEventListeners() {
                 return;
             }
 
-            const outdoor = await updateWeatherData();
+            // 중복 데이터 입력 확인 (오늘 날짜로 이미 입력된 경우)
+            if (latestLocationStatus[loc] && latestLocationStatus[loc].dateStr === getLocalDateString()) {
+                const lastTime = latestLocationStatus[loc].time;
+                // 사용자 요청: 이미 입력되어 있으면 수정할 것인지 팝업
+                if (!confirm(`'${loc}'의 데이터가 이미 입력되어 있습니다 (${lastTime}).\n새로운 값으로 수정하시겠습니까?`)) {
+                    return;
+                }
+            }
+
+            // 실외 온도: 사용자가 수정한 값(outdoor-temp-input) 우선 사용, 없으면 API 업데이트
+            let outdoor = parseFloat(document.getElementById('outdoor-temp-input').value);
+            if (isNaN(outdoor)) {
+                outdoor = await updateWeatherData();
+            }
             updateUI(loc, st, it, h, outdoor);
         });
     }
@@ -1056,14 +1212,26 @@ function init() {
             renderLocationSummary();
         });
 
-        // KMA API 키 설정 가져오기
-        db.ref('settings/kma_api_key').on('value', snapshot => {
+        // 기상청 API 키 설정 가져오기 (단기예보 + 중기예보)
+        db.ref('settings/kma_short_api_key').on('value', snapshot => {
             const val = snapshot.val();
             if (val) {
-                console.log('Firebase에서 API 키를 성공적으로 로드했습니다.');
-                kmaApiKey = val;
+                console.log('Firebase에서 단기예보 API 키를 성공적으로 로드했습니다.');
+                kmaShortApiKey = val;
                 // 키가 업데이트되면 날씨 정보 다시 불러오기
                 updateWeatherData();
+            } else {
+                console.warn('Firebase에 단기예보 API 키가 설정되지 않았습니다. settings/kma_short_api_key 경로에 키를 추가해주세요.');
+            }
+        });
+
+        db.ref('settings/kma_mid_api_key').on('value', snapshot => {
+            const val = snapshot.val();
+            if (val) {
+                console.log('Firebase에서 중기예보 API 키를 성공적으로 로드했습니다.');
+                kmaMidApiKey = val;
+            } else {
+                console.warn('Firebase에 중기예보 API 키가 설정되지 않았습니다. settings/kma_mid_api_key 경로에 키를 추가해주세요.');
             }
         });
     } else {
@@ -1088,6 +1256,27 @@ function init() {
     toggleView('dashboard');
 
     console.log('=== 앱 초기화 완료 ===');
+
+    // ========== 자동 업데이트 스케줄러 ==========
+    // 1. 실시간 날씨 및 대시보드 시계: 1분마다 업데이트 (시계용), 날씨는 30분마다
+    let minuteCount = 0;
+    setInterval(() => {
+        minuteCount++;
+        // 현재 시각 업데이트 (대시보드 상단)
+        updateCurrentTime();
+
+        // 30분마다 날씨 업데이트
+        if (minuteCount % 30 === 0) {
+            console.log('⏰ 실시간 날씨 자동 갱신');
+            updateWeatherData();
+        }
+
+        // 60분(1시간)마다 주간 예보 업데이트 체크
+        if (minuteCount % 60 === 0) {
+            console.log('⏰ 주간 예보 자동 갱신 체크');
+            updateWeeklyForecast();
+        }
+    }, 60 * 1000); // 1분 주기로 실행
 }
 
 // ========== 16. 주간 예보 (D+1 ~ D+7) ==========
@@ -1116,74 +1305,146 @@ async function fetchWithBaseTimeSearch(baseUrl, getParams, initialBaseTime, serv
     return null;
 }
 
+// 주간 예보 강제 새로고침 함수
+async function refreshWeeklyForecast() {
+    console.log('🔄 사용자가 주간 예보 새로고침 요청');
+
+    // 캐시 초기화
+    cachedForecast = null;
+
+    // Firebase 캐시도 삭제
+    if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+        try {
+            await firebase.database().ref('cachedForecast').remove();
+            console.log('🗑️ Firebase 캐시 삭제 완료');
+        } catch (e) {
+            console.warn('Firebase 캐시 삭제 실패:', e);
+        }
+    }
+
+    // 새로운 데이터 가져오기
+    await updateWeeklyForecast();
+}
+
 async function updateWeeklyForecast() {
     const grid = document.getElementById('weekly-forecast-grid');
     if (!grid) return;
-
-    // 1. 전역 변수에 이미 캐시된 데이터가 있다면 즉시 렌더링 (가장 빠름)
-    if (cachedForecast) {
-        console.log('Using global memory cached forecast');
-        displayWeeklyForecast(cachedForecast);
-        updateManagementGuide(cachedForecast);
-        return;
-    }
 
     grid.innerHTML = '<p class="text-center" style="grid-column: span 7;">7일 예보 데이터를 확인 중입니다...</p>';
 
     try {
         const todayStr = getLocalDateString().replace(/-/g, '');
-        const API_KEY = kmaApiKey || KMA_FIXED_KEY;
+        // 단기예보와 중기예보 키 확인
+        const SHORT_API_KEY = kmaShortApiKey;
+        const MID_API_KEY = kmaMidApiKey;
 
-        // Firebase 연동 확인
+        // API 키 검증 먼저 수행
+        if (!SHORT_API_KEY || SHORT_API_KEY.length < 10) {
+            console.error('❌ 단기예보 API 키가 설정되지 않았습니다.');
+            grid.innerHTML = `
+                <p class="text-center" style="grid-column: span 7; color: #ff4444; padding: 20px;">
+                    ⚠️ 기상청 API 키가 설정되지 않았습니다.<br><br>
+                    <strong>Firebase Console</strong>에서 다음 경로에 API 키를 추가해주세요:<br>
+                    <code style="background: #f0f0f0; padding: 5px 10px; border-radius: 4px;">
+                        settings/kma_short_api_key
+                    </code><br><br>
+                    자세한 내용은 <strong>FIREBASE_API_SETUP.md</strong> 파일을 참고하세요.
+                </p>
+            `;
+            return;
+        }
+
+        if (!MID_API_KEY || MID_API_KEY.length < 10) {
+            console.warn('⚠️ 중기예보 API 키가 설정되지 않았습니다. 단기예보 데이터만 사용합니다.');
+        }
+
+        console.log('✅ API 키 확인 완료');
+        console.log(`📅 오늘 날짜: ${todayStr}`);
+
+        // 1. 전역 메모리 캐시 확인 (가장 빠름)
+        if (cachedForecast) {
+            console.log('📦 메모리 캐시 사용 (즉시 로드)');
+            displayWeeklyForecast(cachedForecast);
+            updateManagementGuide(cachedForecast);
+            return;
+        }
+
+        // 2. Firebase 캐시 확인
         if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
             const db = firebase.database();
-            // 2. Firebase 캐시 확인
             const snapshot = await db.ref('cachedForecast').once('value');
             const data = snapshot.val();
 
             if (data && data.date === todayStr) {
-                console.log('Using Firebase cached forecast for today');
+                console.log('📦 Firebase 캐시 사용 (오늘 날짜 일치)');
+                console.log(`   캐시 생성 시각: ${new Date(data.timestamp).toLocaleString()}`);
                 cachedForecast = data.forecast;
                 displayWeeklyForecast(cachedForecast);
                 updateManagementGuide(cachedForecast);
                 return;
+            } else if (data) {
+                console.log(`🔄 캐시 날짜 불일치 (캐시: ${data.date}, 오늘: ${todayStr}) - 새로운 데이터 가져오기`);
             }
         }
 
-        // 3. 캐시가 없거나 날짜가 지난 경우에만 API 호출 (신규 데이터 가져오기)
-        console.log('No valid cache found. Fetching fresh forecast from KMA API...');
-        grid.innerHTML = '<p class="text-center" style="grid-column: span 7;">기상청 최신 데이터를 가져오는 중입니다 (이 과정은 수 초가 걸릴 수 있습니다)...</p>';
+        // 3. 캐시가 없거나 날짜가 지난 경우 API 호출
+        console.log('🌐 기상청 API 호출 시작...');
+        grid.innerHTML = '<p class="text-center" style="grid-column: span 7;">기상청 최신 데이터를 가져오는 중입니다 (최대 10초 소요)...</p>';
 
-        const freshForecast = await fetchIntegratedWeeklyForecast(API_KEY);
+        const freshForecast = await fetchIntegratedWeeklyForecast(SHORT_API_KEY, MID_API_KEY);
 
         if (freshForecast && freshForecast.length > 0) {
+            console.log(`✅ 예보 데이터 ${freshForecast.length}일치 로드 완료`);
             cachedForecast = freshForecast;
-            // 4. Firebase에 오늘의 데이터로 저장 (내일 아침까지 이 데이터 사용)
+
+            // 4. Firebase에 캐시 저장
             if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
-                firebase.database().ref('cachedForecast').set({
+                await firebase.database().ref('cachedForecast').set({
                     date: todayStr,
                     forecast: freshForecast,
                     timestamp: Date.now()
                 });
+                console.log('💾 Firebase에 캐시 저장 완료');
             }
+
             displayWeeklyForecast(freshForecast);
             updateManagementGuide(freshForecast);
+        } else {
+            console.error('❌ 예보 데이터를 가져오지 못했습니다.');
+            grid.innerHTML = '<p class="text-center" style="grid-column: span 7; color: #ff4444;">예보 데이터를 가져오지 못했습니다. 잠시 후 다시 시도해주세요.</p>';
         }
     } catch (e) {
-        console.error('Forecast Update Failed:', e);
-        grid.innerHTML = '<p class="text-center" style="grid-column: span 7; color: #ff4444;">데이터 로드 실패. API 키 또는 네트워크를 확인해주세요.</p>';
+        console.error('❌ Forecast Update Failed:', e);
+        grid.innerHTML = `
+            <p class="text-center" style="grid-column: span 7; color: #ff4444;">
+                데이터 로드 실패<br>
+                <small>${e.message || '알 수 없는 오류'}</small><br><br>
+                API 키 및 네트워크 연결을 확인해주세요.
+            </p>
+        `;
     }
 }
 
-async function fetchIntegratedWeeklyForecast(apiKey) {
+async function fetchIntegratedWeeklyForecast(shortApiKey, midApiKey) {
     // 세아씨엠 위치: 전라북도 군산시 자유로 241 (소룡동)
-    // 기상청 격자 좌표: nx=56, ny=128
-    const nx = 56, ny = 128; // 군산 세아씨엠 (소룡동)
+    // 기상청 격자 좌표: nx=56, ny=92
+    const nx = 56, ny = 92; // 군산 세아씨엠 (소룡동)
     const regIdTa = '11F20503'; // 군산 - 중기기온예보
     const regIdLand = '11F20000'; // 전북 - 중기육상예보
     const todayStr = getLocalDateString().replace(/-/g, '');
     const now = new Date();
-    const encodedKey = encodeURIComponent(apiKey);
+
+    // API 키 검증
+    if (!shortApiKey || shortApiKey.length < 10) {
+        console.error('단기예보 API 키가 설정되지 않았습니다.');
+        return generateMockWeeklyForecast();
+    }
+    if (!midApiKey || midApiKey.length < 10) {
+        console.warn('중기예보 API 키가 설정되지 않았습니다. 단기예보 데이터만 사용합니다.');
+    }
+
+    const encodedShortKey = encodeURIComponent(shortApiKey);
+    const encodedMidKey = midApiKey ? encodeURIComponent(midApiKey) : null;
 
     console.log('=== 주간 예보 API 호출 시작 ===');
     console.log('위치: 군산 세아씨엠 (소룡동)');
@@ -1211,55 +1472,63 @@ async function fetchIntegratedWeeklyForecast(apiKey) {
         'https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst',
         getShortParams,
         fcstBaseTime,
-        encodedKey
+        encodedShortKey
     );
 
     // 2. 중기예보 D+4 ~ D+10 (발표시간 06:00, 18:00)
     // 중기예보는 발표 시각이 고정되어 있으므로 검색 로직 대신 정확한 시각 시도
-    let midTmFc = now.getHours() < 18 ? `${todayStr}0600` : `${todayStr}1800`;
-    let midTaUrl = `https://apis.data.go.kr/1360000/MidFcstInfoService/getMidTa?serviceKey=${encodedKey}&dataType=JSON&regId=${regIdTa}&tmFc=${midTmFc}`;
-    let midLandUrl = `https://apis.data.go.kr/1360000/MidFcstInfoService/getMidLandFcst?serviceKey=${encodedKey}&dataType=JSON&regId=${regIdLand}&tmFc=${midTmFc}`;
+    let midTaRes = null, midLandRes = null;
 
-    const midFetch = async (url) => {
-        return await requestKma(url);
-    };
+    if (encodedMidKey) {
+        let midTmFc = now.getHours() < 18 ? `${todayStr}0600` : `${todayStr}1800`;
+        let midTaUrl = `https://apis.data.go.kr/1360000/MidFcstInfoService/getMidTa?serviceKey=${encodedMidKey}&dataType=JSON&regId=${regIdTa}&tmFc=${midTmFc}`;
+        let midLandUrl = `https://apis.data.go.kr/1360000/MidFcstInfoService/getMidLandFcst?serviceKey=${encodedMidKey}&dataType=JSON&regId=${regIdLand}&tmFc=${midTmFc}`;
 
-    let [midTaRes, midLandRes] = await Promise.all([
-        midFetch(midTaUrl),
-        midFetch(midLandUrl)
-    ]);
-
-    // 06:00 데이터가 아직 없을 경우 어제 18:00 데이터 시도
-    if (midTaRes?.response?.header?.resultCode !== '00' && now.getHours() < 18) {
-        const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
-        const yestStr = getLocalDateString(yesterday).replace(/-/g, '');
-        midTmFc = `${yestStr}1800`;
-        midTaUrl = `https://apis.data.go.kr/1360000/MidFcstInfoService/getMidTa?serviceKey=${encodedKey}&dataType=JSON&regId=${regIdTa}&tmFc=${midTmFc}`;
-        midLandUrl = `https://apis.data.go.kr/1360000/MidFcstInfoService/getMidLandFcst?serviceKey=${encodedKey}&dataType=JSON&regId=${regIdLand}&tmFc=${midTmFc}`;
+        const midFetch = async (url) => {
+            return await requestKma(url);
+        };
 
         [midTaRes, midLandRes] = await Promise.all([
             midFetch(midTaUrl),
             midFetch(midLandUrl)
         ]);
+
+        // 06:00 데이터가 아직 없을 경우 어제 18:00 데이터 시도
+        if (midTaRes?.response?.header?.resultCode !== '00' && now.getHours() < 18) {
+            const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+            const yestStr = getLocalDateString(yesterday).replace(/-/g, '');
+            midTmFc = `${yestStr}1800`;
+            midTaUrl = `https://apis.data.go.kr/1360000/MidFcstInfoService/getMidTa?serviceKey=${encodedMidKey}&dataType=JSON&regId=${regIdTa}&tmFc=${midTmFc}`;
+            midLandUrl = `https://apis.data.go.kr/1360000/MidFcstInfoService/getMidLandFcst?serviceKey=${encodedMidKey}&dataType=JSON&regId=${regIdLand}&tmFc=${midTmFc}`;
+
+            [midTaRes, midLandRes] = await Promise.all([
+                midFetch(midTaUrl),
+                midFetch(midLandUrl)
+            ]);
+        }
+    } else {
+        console.warn('중기예보 API 키가 없어 중기예보 데이터를 가져오지 않습니다.');
     }
 
     const result = [];
-    const tomorrow = new Date(now);
-    tomorrow.setDate(now.getDate() + 1);
-    tomorrow.setHours(0, 0, 0, 0);
 
+    // 기준 날짜 설정 (오늘과 내일)
+    // todayStr은 이미 함수 상단에서 getLocalDateString()으로 구함
+    const todayObj = new Date(todayStr.substring(0, 4), parseInt(todayStr.substring(4, 6)) - 1, todayStr.substring(6, 8));
+    const tomorrow = new Date(todayObj);
+    tomorrow.setDate(todayObj.getDate() + 1);
     const tomorrowStr = tomorrow.toISOString().split('T')[0].replace(/-/g, '');
-    console.log(`D+1 시작일: ${tomorrowStr} (${tomorrow.toLocaleDateString()})`);
 
-    // [단기 데이터 매핑] D+1 ~ D+3 (오늘 데이터 제외)
+    console.log(`기상청 API 연동 기준일: 오늘=${todayStr}, 내일(D+1)=${tomorrowStr}`);
+
+    // [단기 데이터 매핑] D+1 ~ D+3
     const shortMap = {};
     if (shortRes?.response?.header?.resultCode === '00') {
-        console.log('단기예보 API 응답 성공');
         shortRes.response.body.items.item.forEach(item => {
             const dateStr = item.fcstDate;
             const d = new Date(dateStr.substring(0, 4), parseInt(dateStr.substring(4, 6)) - 1, dateStr.substring(6, 8));
 
-            // D+1 (내일)부터의 데이터만 사용 - 오늘 데이터 완전 제외
+            // D+1 (내일)부터의 데이터만 사용 (오늘 데이터 제외가 원칙)
             if (dateStr < tomorrowStr) return;
 
             if (!shortMap[dateStr]) {
@@ -1270,21 +1539,19 @@ async function fetchIntegratedWeeklyForecast(apiKey) {
             if (item.category === 'PTY') shortMap[dateStr].pty.push(parseInt(item.fcstValue));
             if (item.category === 'SKY') shortMap[dateStr].sky.push(parseInt(item.fcstValue));
         });
-        console.log('단기예보 매핑된 날짜:', Object.keys(shortMap).sort());
-    } else {
-        console.warn('단기예보 API 응답 실패:', shortRes?.response?.header?.resultCode);
     }
 
-    // 단기 데이터로 D+1 ~ D+3 채우기
-    const shortKeys = Object.keys(shortMap).sort();
-    shortKeys.forEach(dateStr => {
-        if (result.length >= 3) return; // D+1, D+2, D+3만 우선 사용
+    // 단기 데이터로 result 채우기
+    Object.keys(shortMap).sort().forEach(dateStr => {
         const day = shortMap[dateStr];
+        // 온도 데이터가 충분치 않으면 스킵
+        if (day.temps.length === 0) return;
+
         const min = Math.min(...day.temps);
         const max = Math.max(...day.temps);
-        const amPop = day.pops.length > 8 ? Math.max(...day.pops.slice(6, 12)) : Math.max(...day.pops);
-        const pmPop = day.pops.length > 12 ? Math.max(...day.pops.slice(12, 18)) : Math.max(...day.pops);
-        const op = determineFanHeaterOperation(min, max, amPop, pmPop);
+        const amPop = day.pops.length > 0 ? (day.pops.length > 8 ? Math.max(...day.pops.slice(6, 12)) : Math.max(...day.pops)) : 0;
+        const pmPop = day.pops.length > 0 ? (day.pops.length > 12 ? Math.max(...day.pops.slice(12, 18)) : Math.max(...day.pops)) : 0;
+        const op = determineFanHeaterOperationV2(min, max, amPop, pmPop);
 
         result.push({
             date: day.date,
@@ -1294,56 +1561,92 @@ async function fetchIntegratedWeeklyForecast(apiKey) {
             amRainProb: amPop,
             pmRainProb: pmPop,
             weatherType: mapDetailedWeather(day.sky, day.pty),
-            locationName: "군산 세아씨엠",
+            locationName: "군산 세아씨엠(단기)",
             ...op
         });
     });
 
-    console.log(`단기예보 연동 완료: ${result.length}일치`);
+    console.log(`단기예보 연동 결과: ${result.length}일치 (${result.map(r => r.dateStr).join(', ')})`);
 
-    // [중기 데이터 보완] D+4 ~ D+7
-    console.log('=== 중기예보 데이터 처리 ===');
+    // [중기 데이터 보완] D+3 ~ D+7 (단기예보 이후부터 채움)
     if (midTaRes?.response?.header?.resultCode === '00' && midLandRes?.response?.header?.resultCode === '00') {
-        console.log('중기예보 API 응답 성공');
         const ta = midTaRes.response.body.items.item[0];
         const land = midLandRes.response.body.items.item[0];
 
-        // i=3 이 날씨누리 기준 '3일 후' (즉 D+3), 우리는 D+4(i=4)부터 필요하지만 
-        // 데이터 정합성을 위해 i=3부터 체크하여 result에 없는 날짜를 추가
-        for (let i = 3; i <= 7; i++) {
-            const d = new Date(tomorrow);
-            d.setDate(tomorrow.getDate() + (i - 1));
-            const targetDateStr = d.toISOString().split('T')[0].replace(/-/g, '');
+        // 마지막으로 채워진 날짜 확인
+        let lastDateObj = result.length > 0 ? new Date(result[result.length - 1].date) : new Date(todayObj);
 
-            // 이미 단기예보로 해당 날짜가 있으면 스킵
-            if (result.some(r => r.dateStr === targetDateStr)) continue;
-            if (result.length >= 7) break;
+        // 7일치를 채울 때까지 반복
+        while (result.length < 7) {
+            // 다음 날짜 계산
+            const nextDate = new Date(lastDateObj);
+            nextDate.setDate(lastDateObj.getDate() + 1);
+            lastDateObj = nextDate; // 갱신
 
-            const min = parseFloat(ta[`taMin${i}`]);
-            const max = parseFloat(ta[`taMax${i}`]);
-            const amPop = land[`rnSt${i}Am`] !== undefined ? land[`rnSt${i}Am`] : land[`rnSt${i}`];
-            const pmPop = land[`rnSt${i}Pm`] !== undefined ? land[`rnSt${i}Pm`] : land[`rnSt${i}`];
-            const wf = land[`wf${i}Am`] || land[`wf${i}`];
-            const op = determineFanHeaterOperation(min, max, amPop, pmPop);
+            const nextDateStr = nextDate.toISOString().split('T')[0].replace(/-/g, '');
 
-            result.push({
-                date: d,
-                dateStr: targetDateStr,
-                minTemp: min,
-                maxTemp: max,
-                amRainProb: amPop,
-                pmRainProb: pmPop,
-                weatherType: mapMidStatus(wf),
-                locationName: "군산 세아씨엠",
-                ...op
-            });
+            // 오늘로부터 며칠 후인지 계산 (D+N) - 시간 정보 제거 후 안전하게 계산
+            const d1 = new Date(nextDate); d1.setHours(0, 0, 0, 0);
+            const d2 = new Date(todayObj); d2.setHours(0, 0, 0, 0);
+            const diffDays = Math.round((d1 - d2) / (1000 * 60 * 60 * 24));
+
+            // 중기예보는 3일 후 ~ 10일 후 데이터 제공
+            if (diffDays >= 3 && diffDays <= 10) {
+                try {
+                    let min = parseFloat(ta[`taMin${diffDays}`]);
+                    let max = parseFloat(ta[`taMax${diffDays}`]);
+
+                    // 기온 데이터가 유효하지 않으면 N/A 처리
+                    if (isNaN(min) || isNaN(max)) {
+                        console.warn(`중기예보 데이터 누락 (D+${diffDays}): ${nextDateStr} - N/A 처리`);
+                        min = null;
+                        max = null;
+                    }
+
+                    // 3~7일후는 오전/오후 구분, 8~10일후는 하루 단위
+                    let amPop = 0, pmPop = 0, wfStr = '';
+                    if (diffDays <= 7) {
+                        amPop = land[`rnSt${diffDays}Am`] !== undefined ? land[`rnSt${diffDays}Am`] : (land[`rnSt${diffDays}`] || 0);
+                        pmPop = land[`rnSt${diffDays}Pm`] !== undefined ? land[`rnSt${diffDays}Pm`] : (land[`rnSt${diffDays}`] || 0);
+                        wfStr = land[`wf${diffDays}Am`] || land[`wf${diffDays}`] || '';
+                    } else {
+                        // 8일 이후는 오전/오후 통합
+                        amPop = land[`rnSt${diffDays}`] || 0;
+                        pmPop = land[`rnSt${diffDays}`] || 0;
+                        wfStr = land[`wf${diffDays}`] || '';
+                    }
+
+                    // min, max가 null이면 정보없음 처리
+                    const op = (min === null || max === null)
+                        ? { fan: false, heater: false, risk: '정보없음', reason: '데이터 부족' }
+                        : determineFanHeaterOperationV2(min, max, amPop, pmPop);
+
+                    result.push({
+                        date: nextDate,
+                        dateStr: nextDateStr,
+                        minTemp: min,
+                        maxTemp: max,
+                        amRainProb: amPop,
+                        pmRainProb: pmPop,
+                        weatherType: mapMidStatus(wfStr),
+                        locationName: "군산 세아씨엠(중기)",
+                        ...op
+                    });
+                } catch (err) {
+                    console.error(`중기예보 매핑 중 에러 (D+${diffDays}):`, err);
+                }
+            } else {
+                console.log(`범위 밖 날짜 혹은 데이터 없음 (D+${diffDays}): ${nextDateStr}`);
+                // 10일을 넘어가면 더 이상 데이터 없음
+                if (diffDays > 10) break;
+            }
         }
     }
 
     // 결과가 7일이 안될 경우 Mock 데이터로 보정 (최후의 수단)
     if (result.length < 7) {
         console.warn(`예보 데이터 부족 (${result.length}일). 부족분 Mock 데이터 생성.`);
-        const lastDate = result.length > 0 ? new Date(result[result.length - 1].date) : new Date(tomorrow);
+        let lastDate = result.length > 0 ? new Date(result[result.length - 1].date) : new Date(tomorrow);
         while (result.length < 7) {
             lastDate.setDate(lastDate.getDate() + 1);
             const d = new Date(lastDate);
@@ -1438,12 +1741,12 @@ function displayWeeklyForecast(forecast) {
                 <h4>${dateStr}</h4>
                 <div class="forecast-icon icon-${day.weatherType}"></div>
                 <div class="forecast-temp">
-                    <span class="temp-min">${day.minTemp.toFixed(1)}°</span>
-                    <span class="temp-max">${day.maxTemp.toFixed(1)}°</span>
+                    <span class="temp-min">${typeof day.minTemp === 'number' ? day.minTemp.toFixed(1) + '°' : 'N/A'}</span>
+                    <span class="temp-max">${typeof day.maxTemp === 'number' ? day.maxTemp.toFixed(1) + '°' : 'N/A'}</span>
                 </div>
                 <div class="forecast-rain">
-                    <div class="rain-item"><span class="rain-label">오전</span><span class="rain-prob">${day.amRainProb}%</span></div>
-                    <div class="rain-item"><span class="rain-label">오후</span><span class="rain-prob">${day.pmRainProb}%</span></div>
+                    <div class="rain-item"><span class="rain-label">오전</span><span class="rain-prob">${typeof day.amRainProb === 'number' ? day.amRainProb + '%' : '-'}</span></div>
+                    <div class="rain-item"><span class="rain-label">오후</span><span class="rain-prob">${typeof day.pmRainProb === 'number' ? day.pmRainProb + '%' : '-'}</span></div>
                 </div>
                 <div class="equipment-status">
                     <button class="equipment-btn ${day.fan ? 'active' : ''}" title="${day.reason}" disabled>배풍기</button>
@@ -1486,5 +1789,147 @@ function saveSettings() {
     // 더 이상 브라우저에서 직접 수정하지 않으므로 저장 로직 제거
     alert('설정 정보는 시스템 관리자(Firebase)를 통해 관리됩니다.');
     closeSettingModal();
+}
+
+// ========== 18. 과거 이력 관리 (History) ==========
+function openPastRecordModal() {
+    const modal = document.getElementById('past-record-modal');
+    const locSelect = document.getElementById('past-location');
+    const dateInput = document.getElementById('past-date');
+    if (!modal) return;
+
+    // 위치 옵션 초기화 (한 번만)
+    if (locSelect && locSelect.options.length === 0) {
+        WAREHOUSE_LOCATIONS.forEach(loc => {
+            const opt = document.createElement('option');
+            opt.value = loc;
+            opt.textContent = loc;
+            locSelect.appendChild(opt);
+        });
+    }
+
+    // 기본 시간: 현재
+    if (dateInput) {
+        const now = new Date();
+        const offset = now.getTimezoneOffset() * 60000;
+        const localIso = new Date(now.getTime() - offset).toISOString().slice(0, 16);
+        dateInput.value = localIso;
+    }
+    modal.style.display = 'block';
+}
+
+function closePastRecordModal() {
+    const modal = document.getElementById('past-record-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function savePastRecord() {
+    const dateStr = document.getElementById('past-date').value;
+    const location = document.getElementById('past-location').value;
+    const outdoor = parseFloat(document.getElementById('past-outdoor').value);
+    const steel = parseFloat(document.getElementById('past-steel').value);
+    const indoor = parseFloat(document.getElementById('past-indoor').value);
+    const humid = parseFloat(document.getElementById('past-humid').value);
+
+    if (!dateStr || isNaN(outdoor) || isNaN(steel) || isNaN(indoor) || isNaN(humid)) {
+        alert('모든 입력 항목을 정확히 작성해주세요.');
+        return;
+    }
+
+    // 이슬점 및 리스크 계산
+    const b = 17.62; const c = 243.12;
+    const gamma = (b * indoor) / (c + indoor) + Math.log(humid / 100.0);
+    const dp = (c * gamma) / (b - gamma);
+    const dpFixed = dp.toFixed(1);
+
+    let risk = { label: '안전', class: 'status-safe' };
+    let reason = '정상 범위';
+
+    if (steel <= dp + 2) {
+        risk = { label: '위험', class: 'status-danger' };
+        reason = '결로 발생 위험 (강판온도 ≤ 이슬점+2℃)';
+    } else if (steel <= dp + 5) {
+        risk = { label: '주의', class: 'status-caution' };
+        reason = '결로 주의 (강판온도 근접)';
+    }
+
+    const newLog = {
+        time: dateStr.replace('T', ' ') + ':00',
+        location: location,
+        temp: indoor,
+        humidity: humid,
+        outdoor: outdoor,
+        steel: steel,
+        dp: dpFixed,
+        tempDiff: (steel - dp).toFixed(1),
+        risk: risk.label,
+        riskClass: risk.class,
+        riskReason: reason,
+        source: 'manual_history'
+    };
+
+    monitoringLogs.unshift(newLog);
+
+    if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+        firebase.database().ref('logs').push(newLog);
+    }
+    localStorage.setItem('seah_logs', JSON.stringify(monitoringLogs));
+
+    alert('과거 결로 기록이 등록되었습니다.');
+    closePastRecordModal();
+    updateCondensationHistory();
+}
+
+// 호환성 유지를 위한 더미 함수 (자동 업데이트 스케줄러에서 호출됨)
+function updateCurrentTime() {
+    // 이미 별도의 setInterval에서 처리 중이므로 비워둠
+}
+
+// 운영 기준 변경 적용 (배풍기: 우려 / 열풍기: 심각or이력)
+function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb) {
+    const maxRainProb = Math.max(amRainProb, pmRainProb);
+    const tempDiff = maxTemp - minTemp;
+
+    let status = {
+        fan: false,
+        heater: false,
+        risk: '안전',
+        reason: '정상 범위'
+    };
+
+    // 1. 열풍기 가동 (High Risk)
+    if (minTemp <= -2 || (tempDiff >= 12 && maxRainProb >= 60)) {
+        status.heater = true;
+        status.risk = '위험';
+        status.reason = '심각한 결로 위험 예상 (열풍기 가동)';
+    }
+    // 2. 배풍기 가동 (Moderate Risk)
+    else if (tempDiff >= 8 || maxRainProb >= 40) {
+        status.fan = true;
+        status.risk = '주의';
+        status.reason = '결로 발생 우려 (배풍기 가동)';
+    }
+
+    // 3. 과거 이력 기반
+    if (typeof monitoringLogs !== 'undefined' && monitoringLogs.length > 0) {
+        let matchCount = 0;
+        const recentLogs = monitoringLogs.slice(0, 100);
+        recentLogs.forEach(log => {
+            if (log.source === 'manual_history' && log.outdoor !== undefined) {
+                const pastTemp = parseFloat(log.outdoor);
+                if (!isNaN(pastTemp) && pastTemp >= minTemp - 1 && pastTemp <= maxTemp + 1) {
+                    matchCount++;
+                }
+            }
+        });
+
+        if (matchCount > 0) {
+            status.heater = true;
+            status.fan = false;
+            status.risk = '위험';
+            status.reason = `과거 동일 기온 결로 이력 ${matchCount}건 (열풍기 권장)`;
+        }
+    }
+    return status;
 }
 

@@ -248,10 +248,8 @@ h3 {
 
 .dashboard-grid {
     display: grid;
-    grid-template-columns: 320px 1fr 300px;
-    /* 양옆 컬럼 */
-    gap: 15px;
-    /* 간격을 좁혀서 중앙과 가깝게 배치 */
+    grid-template-columns: 280px 1fr 340px;
+    gap: 20px;
     align-items: stretch;
 }
 
@@ -1954,4 +1952,175 @@ h3 {
         padding: 8px 15px;
         font-size: 0.9rem;
     }
+}
+
+/* Forecast Header & Refresh Button */
+.forecast-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 20px;
+}
+
+.btn-refresh {
+    background: white;
+    border: 1px solid var(--seah-blue);
+    color: var(--seah-blue);
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: var(--shadow-sm);
+    white-space: nowrap;
+}
+
+.btn-refresh:hover {
+    background: #f0f7ff;
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+}
+
+.btn-refresh:active {
+    transform: translateY(0);
+}
+
+/* 모바일 대응 추가 */
+@media (max-width: 768px) {
+    .forecast-header {
+        flex-direction: column;
+        gap: 15px;
+        align-items: center;
+        text-align: center;
+    }
+
+    .btn-refresh {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+/* View Transition */
+.view-content {
+    display: none;
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+.view-content.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* UI Alignment Improvements */
+.report-table {
+    table-layout: fixed;
+    width: 100%;
+}
+
+.report-table th,
+.report-table td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: center;
+    vertical-align: middle;
+}
+
+/* Report Table Column Widths (합계 100%) */
+.report-table th:nth-child(1) {
+    width: 18%;
+}
+
+/* 발생일시 */
+.report-table th:nth-child(2) {
+    width: 14%;
+}
+
+/* 위치 */
+.report-table th:nth-child(3) {
+    width: 8%;
+}
+
+/* 외온 */
+.report-table th:nth-child(4) {
+    width: 8%;
+}
+
+/* 내온 */
+.report-table th:nth-child(5) {
+    width: 8%;
+}
+
+/* 내습 */
+.report-table th:nth-child(6) {
+    width: 8%;
+}
+
+/* 이슬점 */
+.report-table th:nth-child(7) {
+    width: 8%;
+}
+
+/* 소재 */
+.report-table th:nth-child(8) {
+    width: 8%;
+}
+
+/* 차이 */
+.report-table th:nth-child(9) {
+    width: 20%;
+}
+
+/* 상태/원인 */
+
+/* Location Status List Alignment */
+#location-status-list .location-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#location-status-list .loc-header {
+    flex: 0 0 30%;
+}
+
+#location-status-list .status-badges {
+    flex: 1;
+    justify-content: center;
+}
+
+#location-status-list .loc-status-aside {
+    flex: 0 0 25%;
+    text-align: right;
+}
+
+/* Layout Alignment: Fill column height */
+.side-left .input-card {
+    flex-grow: 1;
+    margin-bottom: 0;
+}
+
+.main-content .location-summary-card {
+    flex-grow: 1;
+    margin-bottom: 0;
+}
+
+.side-right .history-card {
+    flex-grow: 1;
+    margin-bottom: 0;
 }
