@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/proxy/kma/:path*",
+      "destination": "https://apis.data.go.kr/:path*"
+    }
+  ]
+}
