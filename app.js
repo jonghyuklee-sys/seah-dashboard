@@ -22,11 +22,10 @@ let lastResetDate = localStorage.getItem('seah_last_reset_date') || "";
 let currentCalendarDate = new Date();
 let isAdmin = sessionStorage.getItem('seah_is_admin') === 'true'; // 관리자 세션 유지
 let cachedForecast = null; // 전역 캐시 변수
+let kmaApiKey = ""; // Firebase에서 가져올 API 키
 
-// 기상청 API 키 블라인드 처리 (Base64)
-// 사용자님, 이 부분의 "INSERT_YOUR_KMA_KEY_HERE"를 실제 기상청 API 키로 바꿔주세요.
-const _k = (s) => atob(s);
-const KMA_FIXED_KEY = _k("YjFlOGEzY2Q0ZDhlMjI1ZjI3ZWUxYjA0ZjVlYTgxNzVkM2FmYmFlYWMyMTZhMjE1ODA4NzY4MTk5MWM0OGE0Yg==");
+// 기상청 API 키 (제공해주신 키로 업데이트됨)
+const KMA_FIXED_KEY = "b1e8a3cd4d8e225f27ee1b04f5ea8175d3afbaeac216a2158087681991c48a4b";
 
 // ========== 3. DOM 요소 참조 ==========
 const elements = {
@@ -379,16 +378,76 @@ function renderLogs() {
     updateTimedReportStatus();
 }
 
-// ========== 10. 날씨 API ==========
+// ========== 10. 날씨 API 유틸리티 (CORS 및 SSL 대응) ==========
+/**
+ * 기상청 API는 브라우저에서 직접 호출 시 CORS 에러가 발생하므로,
+ * 배포 환경(Vercel 등)에서는 vercel.json에 설정된 proxy를 거쳐 요청합니다.
+ */
+async function requestKma(url) {
+    if (!url) return null;
+
+    let target = url;
+
+    // 배포 환경(Vercel) 확인: hostname이 vercel.app인 경우 로컬 프록시 경로 사용
+    const isVercel = window.location.hostname.includes('vercel.app');
+
+    if (isVercel) {
+        // vercel.json의 rewrite 설정을 이용해 CORS 우회
+        target = url.replace('https://apis.data.go.kr/', '/proxy/kma/')
+            .replace('http://apis.data.go.kr/', '/proxy/kma/');
+    }
+
+    try {
+        const response = await fetch(target);
+
+        // 응답 상태 확인
+        if (!response.ok) {
+            console.error(`KMA API Fetch Failed: ${response.status} ${response.statusText}`);
+            // Vercel 프록시 실패 시 AllOrigins로 폴백 시도 (최후의 수단)
+            if (isVercel && !url.includes('allorigins')) {
+                const fallbackUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url.replace('http://', 'https://'))}`;
+                const res = await fetch(fallbackUrl);
+                const json = await res.json();
+                return typeof json.contents === 'string' ? JSON.parse(json.contents) : json.contents;
+            }
+            return null;
+        }
+
+        const data = await response.json();
+        return data;
+    } catch (e) {
+        console.error('KMA Request Error:', e);
+
+        // 네트워크 에러 시 AllOrigins로 폴백
+        if (!url.includes('allorigins')) {
+            try {
+                const fallbackUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url.replace('http://', 'https://'))}`;
+                const res = await fetch(fallbackUrl);
+                const json = await res.json();
+                return typeof json.contents === 'string' ? JSON.parse(json.contents) : json.contents;
+            } catch (e2) {
+                console.error('Fallback Proxy Failed:', e2);
+            }
+        }
+        return null;
+    }
+}
+
 // ========== 10. 실시간 날씨 연동 (Dashboard) ==========
 async function updateWeatherData() {
-    const API_KEY = KMA_FIXED_KEY;
-    const nx = 56, ny = 127; // 군산 세아씨엠 (소룡동)
+    console.log('=== 실시간 날씨 업데이트 시작 ===');
+    // Firebase에서 가져온 키 우선 사용, 없으면 고정 키 사용
+    const API_KEY = kmaApiKey || KMA_FIXED_KEY;
+    const nx = 56, ny = 128; // 군산 세아씨엠 (소룡동) 격자 좌표 최적화
 
-    if (!API_KEY || API_KEY === 'MOCK_KEY') {
+    // 키가 없거나 MOCK_KEY인 경우 데모 데이터 표시
+    if (!API_KEY || API_KEY === 'MOCK_KEY' || API_KEY.length < 10) {
+        console.log('API 키가 유효하지 않아 데모 데이터를 사용합니다.');
         const hours = new Date().getHours();
         const mockTemp = (5 + Math.cos((hours - 14) * Math.PI / 12) * 5).toFixed(1);
         if (elements.outdoorTemp) elements.outdoorTemp.textContent = `${mockTemp}°C`;
+        if (elements.weatherAmProb) elements.weatherAmProb.textContent = `20%`;
+        if (elements.weatherPmProb) elements.weatherPmProb.textContent = `40%`;
         return parseFloat(mockTemp);
     }
 
@@ -396,25 +455,33 @@ async function updateWeatherData() {
         const now = new Date();
         const todayStr = getLocalDateString().replace(/-/g, '');
 
-        // 1. 초단기실황 (현재 기온) - 날짜변경 처리 포함
+        // 1. 초단기실황 (현재 기온)
+        // 발표 시각: 매시 40분. 45분 이후에 안전하게 호출
         let ncstHour = now.getHours();
         let ncstDate = todayStr;
-        if (now.getMinutes() < 45) ncstHour--;
+        if (now.getMinutes() < 45) {
+            ncstHour--;
+        }
         if (ncstHour < 0) {
             ncstHour = 23;
             const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
             ncstDate = getLocalDateString(yesterday).replace(/-/g, '');
         }
         const ncstBaseTime = String(ncstHour).padStart(2, '0') + '00';
-        const encodedKey = encodeURIComponent(API_KEY);
-        const ncstUrl = `http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst?serviceKey=${encodedKey}&dataType=JSON&base_date=${ncstDate}&base_time=${ncstBaseTime}&nx=${nx}&ny=${ny}`;
+
+        // 서비스키는 이미 인코딩된 경우가 많으므로 주의 (여기서는 Decoding Key 기준 encodeURIComponent 적용)
+        const serviceKey = encodeURIComponent(API_KEY);
+        const baseUrl = 'https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0';
+
+        const ncstUrl = `${baseUrl}/getUltraSrtNcst?serviceKey=${serviceKey}&dataType=JSON&base_date=${ncstDate}&base_time=${ncstBaseTime}&nx=${nx}&ny=${ny}`;
 
         // 2. 단기예보 (오늘 강수 정보)
+        // 발표 시각: 02, 05, 08, 11, 14, 17, 20, 23시 (10분 이후)
         const baseTimes = [23, 20, 17, 14, 11, 8, 5, 2];
         let fcstBaseTime = 2, fcstBaseDate = todayStr;
         if (now.getHours() < 2 || (now.getHours() === 2 && now.getMinutes() < 15)) {
             const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
-            fcstBaseDate = yesterday.toISOString().split('T')[0].replace(/-/g, '');
+            fcstBaseDate = getLocalDateString(yesterday).replace(/-/g, '');
             fcstBaseTime = 23;
         } else {
             for (const t of baseTimes) {
@@ -423,20 +490,27 @@ async function updateWeatherData() {
                 }
             }
         }
-        const fcstUrl = `http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst?serviceKey=${encodedKey}&dataType=JSON&base_date=${fcstBaseDate}&base_time=${String(fcstBaseTime).padStart(2, '0')}00&nx=${nx}&ny=${ny}&numOfRows=500`;
+        const fcstUrl = `${baseUrl}/getVilageFcst?serviceKey=${serviceKey}&dataType=JSON&base_date=${fcstBaseDate}&base_time=${String(fcstBaseTime).padStart(2, '0')}00&nx=${nx}&ny=${ny}&numOfRows=500`;
 
+        console.log('NCST URL:', ncstUrl);
+
+        // API 호출
         const [ncstRes, fcstRes] = await Promise.all([
-            fetch(ncstUrl).then(r => r.json()),
-            fetch(fcstUrl).then(r => r.json())
+            requestKma(ncstUrl),
+            requestKma(fcstUrl)
         ]);
 
         let currentTemp = 0;
         if (ncstRes?.response?.header?.resultCode === '00') {
-            const tempItem = ncstRes.response.body.items.item.find(i => i.category === 'T1H');
+            const items = ncstRes.response.body.items.item;
+            const tempItem = items.find(i => i.category === 'T1H');
             if (tempItem) {
                 currentTemp = parseFloat(tempItem.obsrValue);
                 if (elements.outdoorTemp) elements.outdoorTemp.textContent = `${currentTemp}°C`;
+                console.log('현재 기온 업데이트 완료:', currentTemp);
             }
+        } else {
+            console.warn('NCST API 응답 오류:', ncstRes?.response?.header?.resultMsg || '알 수 없는 오류');
         }
 
         if (fcstRes?.response?.header?.resultCode === '00') {
@@ -444,26 +518,47 @@ async function updateWeatherData() {
             const pops = items.filter(i => i.category === 'POP');
             const pcps = items.filter(i => i.category === 'PCP');
 
-            const getStat = (arr, start, end) => {
+            const getStat = (arr, start, end, mode = 'max') => {
                 const slice = arr.filter(i => {
                     const t = parseInt(i.fcstTime);
                     return t >= start && t < end;
                 });
-                return slice.length > 0 ? Math.max(...slice.map(i => parseInt(i.fcstValue) || 0)) : 0;
+                if (slice.length === 0) return 0;
+                const vals = slice.map(i => {
+                    const v = i.fcstValue;
+                    if (v === '강수없음') return 0;
+                    return parseFloat(v) || 0;
+                });
+                return mode === 'max' ? Math.max(...vals) : vals[0];
             };
 
             const amPop = getStat(pops, 600, 1200);
             const pmPop = getStat(pops, 1200, 2400);
+            const amPcp = getStat(pcps, 600, 1200);
+            const pmPcp = getStat(pcps, 1200, 2400);
 
             if (elements.weatherAmProb) elements.weatherAmProb.textContent = `${amPop}%`;
             if (elements.weatherPmProb) elements.weatherPmProb.textContent = `${pmPop}%`;
-            if (elements.weatherAmRain) elements.weatherAmRain.textContent = '0mm'; // PCP 파싱 복잡성으로 우선 0mm 처리 유지
-            if (elements.weatherPmRain) elements.weatherPmRain.textContent = '0mm';
+
+            const formatPcp = (val) => {
+                if (val === 0) return '0mm';
+                if (val < 1.0) return '1mm 미만';
+                if (val >= 50.0) return '50mm 이상';
+                return `${Math.round(val)}mm`;
+            };
+
+            if (elements.weatherAmRain) elements.weatherAmRain.textContent = formatPcp(amPcp);
+            if (elements.weatherPmRain) elements.weatherPmRain.textContent = formatPcp(pmPcp);
+
+            console.log('강수 정보 업데이트 완료');
+        } else {
+            console.warn('FCST API 응답 오류:', fcstRes?.response?.header?.resultCode);
         }
 
         return currentTemp;
     } catch (e) {
         console.error('Weather Sync Error:', e);
+        // 에러 발생 시 UI에 알림 (옵션)
         return 0;
     }
 }
@@ -960,6 +1055,17 @@ function init() {
             updateTimedReportStatus();
             renderLocationSummary();
         });
+
+        // KMA API 키 설정 가져오기
+        db.ref('settings/kma_api_key').on('value', snapshot => {
+            const val = snapshot.val();
+            if (val) {
+                console.log('Firebase에서 API 키를 성공적으로 로드했습니다.');
+                kmaApiKey = val;
+                // 키가 업데이트되면 날씨 정보 다시 불러오기
+                updateWeatherData();
+            }
+        });
     } else {
         // 로컬스토리지에서 로드
         monitoringLogs = JSON.parse(localStorage.getItem('seah_logs')) || [];
@@ -993,11 +1099,12 @@ async function fetchWithBaseTimeSearch(baseUrl, getParams, initialBaseTime, serv
 
     for (let i = currentIdx; i < baseTimes.length; i++) {
         const bt = String(baseTimes[i]).padStart(2, '0') + '00';
-        const url = `${baseUrl}?serviceKey=${serviceKey}&${getParams(bt)}`;
+        const targetBaseUrl = baseUrl.replace('http://', 'https://');
+        const url = `${targetBaseUrl}?serviceKey=${serviceKey}&${getParams(bt)}`;
         console.log(`기상청 API 시도 중: ${bt}...`);
 
         try {
-            const res = await fetch(url).then(r => r.json());
+            const res = await requestKma(url);
             if (res?.response?.header?.resultCode === '00') {
                 return res;
             }
@@ -1025,7 +1132,7 @@ async function updateWeeklyForecast() {
 
     try {
         const todayStr = getLocalDateString().replace(/-/g, '');
-        const API_KEY = KMA_FIXED_KEY;
+        const API_KEY = kmaApiKey || KMA_FIXED_KEY;
 
         // Firebase 연동 확인
         if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
@@ -1070,8 +1177,8 @@ async function updateWeeklyForecast() {
 
 async function fetchIntegratedWeeklyForecast(apiKey) {
     // 세아씨엠 위치: 전라북도 군산시 자유로 241 (소룡동)
-    // 기상청 격자 좌표: nx=56, ny=127
-    const nx = 56, ny = 127; // 군산 세아씨엠 (소룡동)
+    // 기상청 격자 좌표: nx=56, ny=128
+    const nx = 56, ny = 128; // 군산 세아씨엠 (소룡동)
     const regIdTa = '11F20503'; // 군산 - 중기기온예보
     const regIdLand = '11F20000'; // 전북 - 중기육상예보
     const todayStr = getLocalDateString().replace(/-/g, '');
@@ -1101,7 +1208,7 @@ async function fetchIntegratedWeeklyForecast(apiKey) {
     // 1. 단기예보 D+1 ~ D+3
     const getShortParams = (bt) => `dataType=JSON&base_date=${fcstBaseDate}&base_time=${bt}&nx=${nx}&ny=${ny}&numOfRows=1000`;
     const shortRes = await fetchWithBaseTimeSearch(
-        'http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst',
+        'https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst',
         getShortParams,
         fcstBaseTime,
         encodedKey
@@ -1110,12 +1217,16 @@ async function fetchIntegratedWeeklyForecast(apiKey) {
     // 2. 중기예보 D+4 ~ D+10 (발표시간 06:00, 18:00)
     // 중기예보는 발표 시각이 고정되어 있으므로 검색 로직 대신 정확한 시각 시도
     let midTmFc = now.getHours() < 18 ? `${todayStr}0600` : `${todayStr}1800`;
-    let midTaUrl = `http://apis.data.go.kr/1360000/MidFcstInfoService/getMidTa?serviceKey=${encodedKey}&dataType=JSON&regId=${regIdTa}&tmFc=${midTmFc}`;
-    let midLandUrl = `http://apis.data.go.kr/1360000/MidFcstInfoService/getMidLandFcst?serviceKey=${encodedKey}&dataType=JSON&regId=${regIdLand}&tmFc=${midTmFc}`;
+    let midTaUrl = `https://apis.data.go.kr/1360000/MidFcstInfoService/getMidTa?serviceKey=${encodedKey}&dataType=JSON&regId=${regIdTa}&tmFc=${midTmFc}`;
+    let midLandUrl = `https://apis.data.go.kr/1360000/MidFcstInfoService/getMidLandFcst?serviceKey=${encodedKey}&dataType=JSON&regId=${regIdLand}&tmFc=${midTmFc}`;
+
+    const midFetch = async (url) => {
+        return await requestKma(url);
+    };
 
     let [midTaRes, midLandRes] = await Promise.all([
-        fetch(midTaUrl).then(r => r.json()).catch(() => null),
-        fetch(midLandUrl).then(r => r.json()).catch(() => null)
+        midFetch(midTaUrl),
+        midFetch(midLandUrl)
     ]);
 
     // 06:00 데이터가 아직 없을 경우 어제 18:00 데이터 시도
@@ -1123,12 +1234,12 @@ async function fetchIntegratedWeeklyForecast(apiKey) {
         const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
         const yestStr = getLocalDateString(yesterday).replace(/-/g, '');
         midTmFc = `${yestStr}1800`;
-        midTaUrl = `http://apis.data.go.kr/1360000/MidFcstInfoService/getMidTa?serviceKey=${encodedKey}&dataType=JSON&regId=${regIdTa}&tmFc=${midTmFc}`;
-        midLandUrl = `http://apis.data.go.kr/1360000/MidFcstInfoService/getMidLandFcst?serviceKey=${encodedKey}&dataType=JSON&regId=${regIdLand}&tmFc=${midTmFc}`;
+        midTaUrl = `https://apis.data.go.kr/1360000/MidFcstInfoService/getMidTa?serviceKey=${encodedKey}&dataType=JSON&regId=${regIdTa}&tmFc=${midTmFc}`;
+        midLandUrl = `https://apis.data.go.kr/1360000/MidFcstInfoService/getMidLandFcst?serviceKey=${encodedKey}&dataType=JSON&regId=${regIdLand}&tmFc=${midTmFc}`;
 
         [midTaRes, midLandRes] = await Promise.all([
-            fetch(midTaUrl).then(r => r.json()).catch(() => null),
-            fetch(midLandUrl).then(r => r.json()).catch(() => null)
+            midFetch(midTaUrl),
+            midFetch(midLandUrl)
         ]);
     }
 
@@ -1358,11 +1469,22 @@ if (document.readyState === 'loading') {
     init();
 }
 
-// ========== 17. 설정 관리 (비활성화됨) ==========
+// ========== 17. 설정 관리 ==========
 function openSettingModal() {
-    alert('API 설정은 시스템에 의해 고정되어 변경할 수 없습니다.');
+    if (!isAdmin) {
+        alert('관리자만 접근할 수 있습니다.');
+        return;
+    }
+    document.getElementById('setting-modal').style.display = 'block';
 }
 
-function closeSettingModal() { }
-function saveSettings() { }
+function closeSettingModal() {
+    document.getElementById('setting-modal').style.display = 'none';
+}
+
+function saveSettings() {
+    // 더 이상 브라우저에서 직접 수정하지 않으므로 저장 로직 제거
+    alert('설정 정보는 시스템 관리자(Firebase)를 통해 관리됩니다.');
+    closeSettingModal();
+}
 

@@ -179,25 +179,16 @@ h3 {
 
 .brand-box {
     display: flex;
-    flex-direction: column;
-    line-height: 1;
+    align-items: center;
+    justify-content: center;
     margin-right: 5px;
 }
 
-.brand-seah {
-    font-size: 1.6rem;
-    font-weight: 800;
-    color: var(--seah-orange);
-    letter-spacing: -0.5px;
-}
-
-.brand-cm {
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--seah-gray);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-top: 2px;
+.brand-logo {
+    height: 60px;
+    /* 로고 크기 조정 */
+    width: auto;
+    object-fit: contain;
 }
 
 .header-v-divider {

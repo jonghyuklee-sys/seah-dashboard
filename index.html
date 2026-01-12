@@ -15,8 +15,7 @@
         <header class="main-header">
             <div class="header-left">
                 <div class="brand-box">
-                    <span class="brand-seah">SeAH</span>
-                    <span class="brand-cm">Coated Metal</span>
+                    <img src="seah-logo.jpg" alt="SeAH CM Logo" class="brand-logo">
                 </div>
                 <div class="header-v-divider"></div>
                 <h1>결로 지수 모니터링 시스템</h1>
@@ -48,14 +47,12 @@
                 <span class="close-btn" onclick="closeSettingModal()">&times;</span>
             </div>
             <div class="modal-body">
-                <div class="setting-group">
-                    <label for="kma-api-key">기상청 API 키 (Decoding Key)</label>
-                    <input type="text" id="kma-api-key" placeholder="공공데이터포털에서 발급받은 인증키를 입력하세요">
-                    <small class="text-muted">입력하지 않으면 데모(Mock) 데이터가 사용됩니다. <br>API 키는 브라우저에 안전하게 저장됩니다.</small>
+                <div class="setting-group" style="text-align: center; padding: 20px 0;">
+                    <p>기상청 API 키 및 주요 시스템 설정은 <br><strong>Firebase 콘솔</strong>에서 직접 관리됩니다.</p>
+                    <small class="text-muted">보안을 위해 앱 내 수정 기능을 비활성화하였습니다.</small>
                 </div>
                 <div class="setting-actions">
-                    <button class="btn-primary" onclick="saveSettings()">저장</button>
-                    <button class="btn-secondary" onclick="closeSettingModal()">취소</button>
+                    <button class="btn-primary" onclick="closeSettingModal()">확인</button>
                 </div>
             </div>
         </div>
@@ -383,20 +380,19 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-analytics-compat.js"></script>
 
     <script>
-        // API 키 노출 방지를 위한 블라인드 처리 (Base64)
-        const _fbv = (s) => atob(s);
+        // Firebase 설정 (사용자 프로젝트: seahcm-dashboard)
         const firebaseConfig = {
-            apiKey: _fbv("QUl6YVN5QXQyNkp5V19NTnqjTzMzSzNCUFg0cFBSR1VBVUgyb2Nj"),
-            authDomain: _fbv("c2VhaGNtLWRhc2hib2FyZC5maXJlYmFzZWFwcC5jb20="),
-            databaseURL: _fbv("aHR0cHM6Ly9zZWFoY20tZGFzaGJvYXJkLWRlZmF1bHQtcnRkYi5hc2lhLXNvdXRoZWFzdDEuZmlyZWJhc2VkYXRhYmFzZS5hcHA="),
-            projectId: _fbv("c2VhaGNtLWRhc2hib2FyZA=="),
-            storageBucket: _fbv("c2VhaGNtLWRhc2hib2FyZC5maXJlYmFzZXN0b3JhZ2UuYXBw"),
-            messagingSenderId: _fbv("ODkyNTM5NjY0ODkw"),
-            appId: _fbv("MTo4OTI1Mzk2NjQ4OTA6d2ViOjBhMGE5Mjc1NjE1MTc1YmE1MDRjNDM="),
-            measurementId: _fbv("Ry1ZMUNRSFQ4MUc5")
+            apiKey: "AIzaSyAt26JyW_MNzj033K3BPX4pPRGUAUH2occ",
+            authDomain: "seahcm-dashboard.firebaseapp.com",
+            databaseURL: "https://seahcm-dashboard-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "seahcm-dashboard",
+            storageBucket: "seahcm-dashboard.firebasestorage.app",
+            messagingSenderId: "892539664890",
+            appId: "1:892539664890:web:0a0a9275615175ba504c43",
+            measurementId: "G-Y1CQHT81G9"
         };
 
-        // Firebase 시작하기
+        // Firebase 초기화
         firebase.initializeApp(firebaseConfig);
         firebase.analytics();
     </script>
