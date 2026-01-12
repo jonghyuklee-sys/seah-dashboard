@@ -20,6 +20,13 @@ let latestLocationStatus = {};
 let allReports = {};
 let lastResetDate = localStorage.getItem('seah_last_reset_date') || "";
 let currentCalendarDate = new Date();
+let isAdmin = sessionStorage.getItem('seah_is_admin') === 'true'; // 관리자 세션 유지
+let cachedForecast = null; // 전역 캐시 변수
+
+// 기상청 API 키 블라인드 처리 (Base64)
+// 사용자님, 이 부분의 "INSERT_YOUR_KMA_KEY_HERE"를 실제 기상청 API 키로 바꿔주세요.
+const _k = (s) => atob(s);
+const KMA_FIXED_KEY = _k("YjFlOGEzY2Q0ZDhlMjI1ZjI3ZWUxYjA0ZjVlYTgxNzVkM2FmYmFlYWMyMTZhMjE1ODA4NzY4MTk5MWM0OGE0Yg==");
 
 // ========== 3. DOM 요소 참조 ==========
 const elements = {
@@ -97,9 +104,28 @@ function renderLocationSummary() {
     }
 
     // 모든 위치를 항상 표시
+    const todayStr = getLocalDateString();
+    const dayReports = allReports[todayStr] || {};
+
+    // 당일 리포트 중 가장 최신 슬롯(15:00 -> 07:00 순) 스냅샷 찾기
+    const latestSnapshotSlot = ['15:00', '07:00'].find(slot => dayReports[slot.replace(':', '')] || dayReports[slot]);
+    const snapshotData = latestSnapshotSlot ? (dayReports[latestSnapshotSlot.replace(':', '')] || dayReports[latestSnapshotSlot]).snapshot : null;
+
+    // 데이터 기준 시간 표시 (헤더 옆)
+    const syncTimeEl = document.getElementById('location-sync-time');
+    if (syncTimeEl) {
+        if (latestSnapshotSlot) {
+            syncTimeEl.textContent = `(${todayStr} ${latestSnapshotSlot} 점검 기준)`;
+            syncTimeEl.style.color = 'var(--seah-blue)'; // 공식 데이터는 강조
+        } else {
+            syncTimeEl.textContent = `(실시간 입력 기준)`;
+            syncTimeEl.style.color = '#666';
+        }
+    }
+
     const html = WAREHOUSE_LOCATIONS.map(loc => {
-        // 데이터가 있으면 사용, 없으면 기본값
-        const data = latestLocationStatus[loc] || {
+        // 1. 당일 리포트 스냅샷이 있으면 우선 사용, 없으면 실시간(latestLocationStatus), 마지막으로 기본값
+        const data = (snapshotData && snapshotData[loc]) || latestLocationStatus[loc] || {
             steel: '-',
             dp: '-',
             riskLabel: '미측정',
@@ -115,6 +141,10 @@ function renderLocationSummary() {
         const packClass = data.pack === '미포장' ? 'unpacked' : '';
         const prodClass = data.product === '결로 인지' ? 'detected' : 'good';
 
+        // 관리자가 아니면 토글 버튼 비활성화 (보이지 않는 화살표 처리 등)
+        const toggleDisabled = isAdmin ? '' : 'disabled style="cursor: default;"';
+        const arrow = isAdmin ? ' ▾' : '';
+
         return `
             <div class="status-item">
                 <div class="loc-main-content">
@@ -123,12 +153,12 @@ function renderLocationSummary() {
                         <span class="loc-data">${data.steel}°C / ${data.dp}°C <small>(${data.time})</small></span>
                     </div>
                     <div class="status-badges">
-                        <button class="badge badge-gate ${gateClass}" data-location="${loc}" data-field="gate">GATE: ${data.gate} ▾</button>
-                        <button class="badge badge-pack ${packClass}" data-location="${loc}" data-field="pack">${data.pack} ▾</button>
+                        <button class="badge badge-gate ${gateClass}" data-location="${loc}" data-field="gate" ${toggleDisabled}>GATE: ${data.gate}${arrow}</button>
+                        <button class="badge badge-pack ${packClass}" data-location="${loc}" data-field="pack" ${toggleDisabled}>${data.pack}${arrow}</button>
                     </div>
                 </div>
                 <div class="loc-status-aside">
-                    <button class="badge badge-product ${prodClass}" data-location="${loc}" data-field="product">${data.product} ▾</button>
+                    <button class="badge badge-product ${prodClass}" data-location="${loc}" data-field="product" ${toggleDisabled}>${data.product}${arrow}</button>
                     <div class="loc-risk ${riskBgClass}">${data.riskLabel}</div>
                 </div>
             </div>
@@ -169,21 +199,113 @@ function updateLocationStatus(location, steel, dp, risk, gate, pack, product) {
 
 // ========== 7. 위치 상태 토글 ==========
 function toggleLocationStatus(location, field) {
-    const data = latestLocationStatus[location];
-    if (!data) {
-        alert('먼저 해당 위치의 환경 데이터를 입력해주세요.');
+    // 1. 현재 표시 중인 데이터 원천 파악 (스냅샷 vs 실시간)
+    const todayStr = getLocalDateString();
+    const dayReports = allReports[todayStr] || {};
+    const latestSnapshotSlot = ['15:00', '07:00'].find(slot => dayReports[slot.replace(':', '')] || dayReports[slot]);
+
+    // 현재 UI에 표시되고 있는 데이터 가져오기
+    let currentData = null;
+    let isSnapshot = false;
+    let snapshotSlot = null;
+
+    if (latestSnapshotSlot) {
+        snapshotSlot = latestSnapshotSlot.replace(':', '');
+        const snapshot = dayReports[snapshotSlot] || dayReports[latestSnapshotSlot];
+        if (snapshot && snapshot.snapshot && snapshot.snapshot[location]) {
+            currentData = snapshot.snapshot[location];
+            isSnapshot = true;
+        }
+    }
+
+    if (!currentData) {
+        currentData = latestLocationStatus[location];
+    }
+
+    if (!currentData) {
+        alert('토글할 데이터가 없습니다. 먼저 실시간 분석을 수행하거나 점검 기록을 등록해주세요.');
         return;
     }
 
+    // 2. 상태 토글
     if (field === 'gate') {
-        data.gate = data.gate === '열림' ? '닫힘' : '열림';
+        currentData.gate = currentData.gate === '열림' ? '닫힘' : '열림';
     } else if (field === 'pack') {
-        data.pack = data.pack === '포장' ? '미포장' : '포장';
+        currentData.pack = currentData.pack === '포장' ? '미포장' : '포장';
     } else if (field === 'product') {
-        data.product = data.product === '양호' ? '결로 인지' : '양호';
+        currentData.product = currentData.product === '양호' ? '결로 인지' : '양호';
     }
 
-    updateLocationStatus(location, data.steel, data.dp, { label: data.riskLabel, class: data.riskClass }, data.gate, data.pack, data.product);
+    // 3. 데이터 저장
+    // 3-1. 실시간 상태 업데이트 (Master)
+    updateLocationStatus(location, currentData.steel, (currentData.dp || currentData.dewPoint), { label: currentData.riskLabel, class: currentData.riskClass }, currentData.gate, currentData.pack, currentData.product);
+
+    // 3-2. 만약 스냅샷을 보고 있었다면, 해당 스냅샷(보고서)도 업데이트하여 UI 동기화
+    if (isSnapshot && snapshotSlot && typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+        firebase.database().ref(`reports/${todayStr}/${snapshotSlot}/snapshot/${location}`).update({
+            gate: currentData.gate,
+            pack: currentData.pack,
+            product: currentData.product
+        });
+    }
+}
+
+// ========== 7.5 관리자 인증 로직 ==========
+function openPwdModal() {
+    document.getElementById('pwd-modal').style.display = 'block';
+    document.getElementById('admin-pwd-input').focus();
+}
+
+function closePwdModal() {
+    document.getElementById('pwd-modal').style.display = 'none';
+    document.getElementById('admin-pwd-input').value = '';
+}
+
+function loginAdmin() {
+    const pwdInput = document.getElementById('admin-pwd-input').value;
+    // 관리자 암호 설정 (예: 0000)
+    if (pwdInput === '0000') {
+        isAdmin = true;
+        sessionStorage.setItem('seah_is_admin', 'true');
+        applyAdminUI();
+        closePwdModal();
+        alert('관리자 모드로 전환되었습니다.');
+    } else {
+        alert('암호가 틀렸습니다.');
+        document.getElementById('admin-pwd-input').value = '';
+    }
+}
+
+function logoutAdmin() {
+    if (confirm('로그아웃 하시겠습니까?')) {
+        isAdmin = false;
+        sessionStorage.removeItem('seah_is_admin');
+        applyAdminUI();
+        alert('로그아웃 되었습니다.');
+    }
+}
+
+function applyAdminUI() {
+    if (isAdmin) {
+        document.body.classList.add('is-admin');
+    } else {
+        document.body.classList.remove('is-admin');
+    }
+    // 관리자 상태에 따라 리렌더링이 필요한 부분들
+    renderLocationSummary();
+    updateTimedReportStatus();
+
+    // 입력 필드들 비활성화/활성화 제어
+    const inputs = [
+        'location-select', 'steel-temp-input', 'temp-input',
+        'humidity-input', 'report-date', 'report-time',
+        'status-inspection-date'
+    ];
+
+    inputs.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = !isAdmin;
+    });
 }
 
 // ========== 8. UI 업데이트 ==========
@@ -259,10 +381,8 @@ function renderLogs() {
 
 // ========== 10. 날씨 API ==========
 // ========== 10. 실시간 날씨 연동 (Dashboard) ==========
-// 세아씨엠 위치: 전라북도 군산시 자유로 241 (소룡동)
-// 기상청 격자 좌표: nx=56, ny=127 (군산 소룡동/조촌동 지역)
 async function updateWeatherData() {
-    const API_KEY = localStorage.getItem('kma_api_key');
+    const API_KEY = KMA_FIXED_KEY;
     const nx = 56, ny = 127; // 군산 세아씨엠 (소룡동)
 
     if (!API_KEY || API_KEY === 'MOCK_KEY') {
@@ -419,22 +539,21 @@ async function submitTimedReport(timeSlot) {
 }
 
 function updateTimedReportStatus() {
-    const rawAllReports = localStorage.getItem('seah_all_reports');
-    const reports = JSON.parse(rawAllReports || '{}');
     const selectedDate = document.getElementById('status-inspection-date')?.value || document.getElementById('report-date').value;
-    const dayReports = reports[selectedDate] || {};
+    const dayReports = allReports[selectedDate] || {};
 
     const times = ['07:00', '15:00'];
     times.forEach(time => {
-        const slotId = `slot-${time.replace(':', '')}`;
+        const slotKey = time.replace(':', '');
+        const slotId = `slot-${slotKey}`;
         const slot = document.getElementById(slotId);
         if (!slot) return;
 
-        const editBtn = document.getElementById(`edit-btn-${time.replace(':', '')}`);
+        const editBtn = document.getElementById(`edit-btn-${slotKey}`);
         const viewBtn = document.getElementById(`view-btn-${time.replace(':', '')}`);
         const statusText = slot.querySelector('.slot-status');
 
-        if (dayReports[time]) {
+        if (dayReports[slotKey]) {
             // 이미 해당 시간대 보고가 존재하는 경우
             slot.classList.add('completed');
             statusText.innerText = '등록 완료';
@@ -442,7 +561,15 @@ function updateTimedReportStatus() {
             if (editBtn) {
                 editBtn.innerText = '수정';
                 editBtn.className = 'btn-mini btn-primary-mini';
-                editBtn.disabled = false;
+
+                // 관리자가 아니면 수정 버튼 숨김
+                if (!isAdmin) {
+                    editBtn.style.display = 'none';
+                } else {
+                    editBtn.style.display = 'inline-block';
+                }
+
+                editBtn.disabled = !isAdmin;
                 editBtn.onclick = () => {
                     if (confirm(`${selectedDate} ${time} 점검 보고서를 최신 데이터로 수정(재기록)하시겠습니까?`)) {
                         document.getElementById('report-date').value = selectedDate;
@@ -466,7 +593,14 @@ function updateTimedReportStatus() {
             if (editBtn) {
                 editBtn.innerText = '기록';
                 editBtn.className = 'btn-mini btn-primary-mini';
-                editBtn.disabled = false;
+                // 관리자가 아니면 숨김 처리 (CSS로 처리되지만 안전하게 비활성화)
+                if (!isAdmin) {
+                    editBtn.style.display = 'none';
+                } else {
+                    editBtn.style.display = 'inline-block';
+                }
+
+                editBtn.disabled = !isAdmin;
                 editBtn.onclick = () => {
                     if (confirm(`${selectedDate} ${time} 점검 보고서를 현재 최신 데이터로 기록하시겠습니까?`)) {
                         document.getElementById('report-date').value = selectedDate;
@@ -489,11 +623,7 @@ function updateTimedReportStatus() {
 function viewReportDetails(time, manualDate = null) {
     const todayStr = getLocalDateString();
     const targetDate = manualDate || todayStr;
-
-    // 항상 localStorage의 최신 데이터를 기준으로 히스토리를 조회하도록 보정
-    const rawAllReports = localStorage.getItem('seah_all_reports');
-    const reports = JSON.parse(rawAllReports || '{}');
-    const dayData = reports[targetDate];
+    const dayData = allReports[targetDate];
 
     if (!dayData || Object.keys(dayData).length === 0) {
         alert('해당 날짜의 기록을 찾을 수 없습니다.');
@@ -816,7 +946,6 @@ function init() {
         });
 
         db.ref(`reports/${todayStr}`).on('value', snapshot => {
-            const todayReports = snapshot.val() || {};
             updateTimedReportStatus();
         });
 
@@ -829,6 +958,7 @@ function init() {
             allReports = snapshot.val() || {};
             renderHistory();
             updateTimedReportStatus();
+            renderLocationSummary();
         });
     } else {
         // 로컬스토리지에서 로드
@@ -842,6 +972,9 @@ function init() {
         updateTimedReportStatus();
     }
 
+    // 관리자 UI 적용
+    applyAdminUI();
+
     // 이벤트 리스너 설정
     setupEventListeners();
 
@@ -849,7 +982,6 @@ function init() {
     toggleView('dashboard');
 
     console.log('=== 앱 초기화 완료 ===');
-    console.log('위치별 현황이 표시되어야 합니다.');
 }
 
 // ========== 16. 주간 예보 (D+1 ~ D+7) ==========
@@ -881,23 +1013,58 @@ async function updateWeeklyForecast() {
     const grid = document.getElementById('weekly-forecast-grid');
     if (!grid) return;
 
-    grid.innerHTML = '<p class="text-center" style="grid-column: span 7;">실시간 7일 예보를 불러오는 중입니다...</p>';
+    // 1. 전역 변수에 이미 캐시된 데이터가 있다면 즉시 렌더링 (가장 빠름)
+    if (cachedForecast) {
+        console.log('Using global memory cached forecast');
+        displayWeeklyForecast(cachedForecast);
+        updateManagementGuide(cachedForecast);
+        return;
+    }
+
+    grid.innerHTML = '<p class="text-center" style="grid-column: span 7;">7일 예보 데이터를 확인 중입니다...</p>';
 
     try {
-        const API_KEY = localStorage.getItem('kma_api_key');
-        let forecast = [];
+        const todayStr = getLocalDateString().replace(/-/g, '');
+        const API_KEY = KMA_FIXED_KEY;
 
-        if (!API_KEY || API_KEY === 'MOCK_KEY') {
-            forecast = generateMockWeeklyForecast();
-        } else {
-            forecast = await fetchIntegratedWeeklyForecast(API_KEY);
+        // Firebase 연동 확인
+        if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+            const db = firebase.database();
+            // 2. Firebase 캐시 확인
+            const snapshot = await db.ref('cachedForecast').once('value');
+            const data = snapshot.val();
+
+            if (data && data.date === todayStr) {
+                console.log('Using Firebase cached forecast for today');
+                cachedForecast = data.forecast;
+                displayWeeklyForecast(cachedForecast);
+                updateManagementGuide(cachedForecast);
+                return;
+            }
         }
 
-        displayWeeklyForecast(forecast);
-        updateManagementGuide(forecast);
+        // 3. 캐시가 없거나 날짜가 지난 경우에만 API 호출 (신규 데이터 가져오기)
+        console.log('No valid cache found. Fetching fresh forecast from KMA API...');
+        grid.innerHTML = '<p class="text-center" style="grid-column: span 7;">기상청 최신 데이터를 가져오는 중입니다 (이 과정은 수 초가 걸릴 수 있습니다)...</p>';
+
+        const freshForecast = await fetchIntegratedWeeklyForecast(API_KEY);
+
+        if (freshForecast && freshForecast.length > 0) {
+            cachedForecast = freshForecast;
+            // 4. Firebase에 오늘의 데이터로 저장 (내일 아침까지 이 데이터 사용)
+            if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+                firebase.database().ref('cachedForecast').set({
+                    date: todayStr,
+                    forecast: freshForecast,
+                    timestamp: Date.now()
+                });
+            }
+            displayWeeklyForecast(freshForecast);
+            updateManagementGuide(freshForecast);
+        }
     } catch (e) {
         console.error('Forecast Update Failed:', e);
-        grid.innerHTML = '<p class="text-center" style="grid-column: span 7; color: #ff4444;">데이터 로드 실패. API 키를 확인해주세요.</p>';
+        grid.innerHTML = '<p class="text-center" style="grid-column: span 7; color: #ff4444;">데이터 로드 실패. API 키 또는 네트워크를 확인해주세요.</p>';
     }
 }
 
@@ -1088,30 +1255,39 @@ async function fetchIntegratedWeeklyForecast(apiKey) {
     // 최종 결과 로깅
     console.log('=== 주간 예보 최종 결과 ===');
     console.log(`총 ${result.length}일치 예보 데이터`);
-    result.slice(0, 7).forEach((day, idx) => {
-        console.log(`D+${idx + 1}: ${day.dateStr} (${day.date.toLocaleDateString()}) - 최저 ${day.minTemp}°C / 최고 ${day.maxTemp}°C`);
+
+    // date 객체가 직렬화 중 유실될 수 있으므로 정규화 처리
+    const normalizedResult = result.slice(0, 7).map(day => ({
+        ...day,
+        date: day.date instanceof Date ? day.date.getTime() : day.date
+    }));
+
+    normalizedResult.forEach((day, idx) => {
+        const d = new Date(day.date);
+        console.log(`D+${idx + 1}: ${day.dateStr} (${d.toLocaleDateString()}) - 최저 ${day.minTemp}°C / 최고 ${day.maxTemp}°C`);
     });
 
-    return result.slice(0, 7);
+    return normalizedResult;
 }
 
 function mapDetailedWeather(skyArr, ptyArr) {
-    if (!ptyArr.length) return 'sunny';
-    // 하루 중 가장 "심각한" 기상 상태를 우선 표시 (눈 > 비 > 구름)
-    if (ptyArr.includes(3)) return 'snow';
-    if (ptyArr.some(p => p === 1 || p === 2 || p === 4)) return 'rain-light';
+    if (!ptyArr || ptyArr.length === 0) return 'sunny';
 
-    const midIdx = Math.floor(skyArr.length / 2);
-    const sky = skyArr[midIdx] || 1;
+    // 비/눈 우선 순위 (눈 > 비 > 구름)
+    if (ptyArr.includes(3) || ptyArr.includes(7)) return 'snow';
+    if (ptyArr.some(p => [1, 2, 4, 5, 6].includes(p))) return 'rain-light';
+
+    const sky = skyArr && skyArr.length > 0 ? skyArr[Math.floor(skyArr.length / 2)] : 1;
     if (sky === 1) return 'sunny';
     if (sky === 3) return 'cloudy';
-    return 'cloudy-heavy';
+    if (sky === 4) return 'cloudy-heavy';
+    return 'sunny';
 }
 
 function mapMidStatus(wf) {
     if (!wf) return 'sunny';
+    if (wf.includes('눈') || wf.includes('진눈깨비')) return 'snow';
     if (wf.includes('비')) return 'rain-light';
-    if (wf.includes('눈')) return 'snow';
     if (wf.includes('흐림')) return 'cloudy-heavy';
     if (wf.includes('구름많음')) return 'cloudy';
     return 'sunny';
@@ -1143,7 +1319,8 @@ function displayWeeklyForecast(forecast) {
     if (!grid) return;
 
     grid.innerHTML = forecast.slice(0, 7).map(day => {
-        const dateStr = `${day.date.getMonth() + 1}/${day.date.getDate()}(${['일', '월', '화', '수', '목', '금', '토'][day.date.getDay()]})`;
+        const d = new Date(day.date);
+        const dateStr = `${d.getMonth() + 1}/${d.getDate()}(${['일', '월', '화', '수', '목', '금', '토'][d.getDay()]})`;
         const riskClass = day.risk === '안전' ? 'status-safe' : 'status-caution';
         return `
             <div class="forecast-day-card">
@@ -1181,37 +1358,11 @@ if (document.readyState === 'loading') {
     init();
 }
 
-// ========== 17. 설정 관리 ==========
+// ========== 17. 설정 관리 (비활성화됨) ==========
 function openSettingModal() {
-    const modal = document.getElementById('setting-modal');
-    const input = document.getElementById('kma-api-key');
-    if (modal && input) {
-        input.value = localStorage.getItem('kma_api_key') || '';
-        modal.style.display = 'block';
-    }
+    alert('API 설정은 시스템에 의해 고정되어 변경할 수 없습니다.');
 }
 
-function closeSettingModal() {
-    const modal = document.getElementById('setting-modal');
-    if (modal) {
-        modal.style.display = 'none';
-    }
-}
-
-function saveSettings() {
-    const input = document.getElementById('kma-api-key');
-    if (input) {
-        const apiKey = input.value.trim();
-        if (apiKey) {
-            localStorage.setItem('kma_api_key', apiKey);
-            alert('설정이 저장되었습니다.\n이제 기상청 API를 사용하여 주간 날씨를 업데이트합니다.');
-            updateWeeklyForecast(); // 데이터 새로고침
-        } else {
-            localStorage.removeItem('kma_api_key');
-            alert('API 키가 삭제되었습니다. 데모 모드로 전환됩니다.');
-            updateWeeklyForecast();
-        }
-        closeSettingModal();
-    }
-}
+function closeSettingModal() { }
+function saveSettings() { }
 

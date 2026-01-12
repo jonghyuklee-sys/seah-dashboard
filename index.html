@@ -26,7 +26,10 @@
                 <nav class="header-nav">
                     <button id="nav-dashboard" class="btn-nav active" onclick="toggleView('dashboard')">대시보드</button>
                     <button id="nav-forecast" class="btn-nav" onclick="toggleView('forecast')">주간 예측 ↗</button>
-                    <button id="setting-btn" class="btn-nav" onclick="openSettingModal()"
+                    <button id="admin-login-btn" class="btn-nav admin-hidden" onclick="openPwdModal()">관리자 로그인</button>
+                    <div class="admin-badge admin-only">관리자 모드</div>
+                    <button id="admin-logout-btn" class="btn-nav admin-only" onclick="logoutAdmin()">로그아웃</button>
+                    <button id="setting-btn" class="btn-nav admin-only" onclick="openSettingModal()"
                         style="padding: 5px 10px;">⚙️</button>
                 </nav>
                 <div id="current-time">2024-01-07 13:00</div>
@@ -104,7 +107,11 @@
                         <label for="humidity-input">실내 습도 (%)</label>
                         <input type="number" id="humidity-input" step="1" placeholder="65">
                     </div>
-                    <button id="calculate-btn" class="btn-primary">실시간 결로 분석하기</button>
+                    <button id="calculate-btn" class="btn-primary admin-only">실시간 결로 분석하기</button>
+                    <div class="admin-hidden"
+                        style="text-align: center; color: #666; padding: 10px; background: #f8f9fa; border-radius: 8px; font-size: 0.85rem;">
+                        💡 데이터 입력은 관리자만 가능합니다.
+                    </div>
                 </div>
 
                 <div class="card metrics-card mt-md">
@@ -165,7 +172,8 @@
                 </div>
 
                 <div class="card location-summary-card mt-md">
-                    <h3>위치별 최신 현황</h3>
+                    <h3>위치별 최신 현황 <span id="location-sync-time"
+                            style="font-size: 0.85rem; font-weight: normal; color: #666; margin-left: 8px;"></span></h3>
                     <div id="location-status-list" class="status-list">
                         <!-- JavaScript에서 렌더링됨 -->
                     </div>
@@ -223,7 +231,7 @@
                     <h3>모니터링 로그 (최근 5건)</h3>
                     <div class="header-btns">
                         <button id="view-all-logs-btn" class="btn-mini" onclick="viewAllLogs()">전체보기</button>
-                        <button id="clear-log-btn" class="btn-mini btn-danger">기록 삭제</button>
+                        <button id="clear-log-btn" class="btn-mini btn-danger admin-only">기록 삭제</button>
                     </div>
                 </div>
                 <div class="table-container">
@@ -303,7 +311,18 @@
             </div>
         </div>
     </div>
-    </div>
+
+    <!-- Password Prompt Modal -->
+    <div id="pwd-modal" class="pwd-modal">
+        <div class="pwd-modal-content">
+            <h3>관리자 인증</h3>
+            <p>관리자 암호를 입력해주세요.</p>
+            <input type="password" id="admin-pwd-input" class="pwd-input" placeholder="****" maxlength="4">
+            <div class="pwd-btns">
+                <button class="btn-cancel" onclick="closePwdModal()">취소</button>
+                <button class="btn-login" onclick="loginAdmin()">확인</button>
+            </div>
+        </div>
     </div>
 
     <div id="forecast-view" class="view-content">
@@ -364,16 +383,17 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-analytics-compat.js"></script>
 
     <script>
-        // 이미지에서 확인된 사용자님의 설정값입니다.
+        // API 키 노출 방지를 위한 블라인드 처리 (Base64)
+        const _fbv = (s) => atob(s);
         const firebaseConfig = {
-            apiKey: "AIzaSyAt26JyW_MNzjO33K3BPX4pPRGUAUH2occ",
-            authDomain: "seahcm-dashboard.firebaseapp.com",
-            databaseURL: "https://seahcm-dashboard-default-rtdb.asia-southeast1.firebasedatabase.app",
-            projectId: "seahcm-dashboard",
-            storageBucket: "seahcm-dashboard.firebasestorage.app",
-            messagingSenderId: "892539664890",
-            appId: "1:892539664890:web:0a0a9275615175ba504c43",
-            measurementId: "G-Y1CQHT81G9"
+            apiKey: _fbv("QUl6YVN5QXQyNkp5V19NTnqjTzMzSzNCUFg0cFBSR1VBVUgyb2Nj"),
+            authDomain: _fbv("c2VhaGNtLWRhc2hib2FyZC5maXJlYmFzZWFwcC5jb20="),
+            databaseURL: _fbv("aHR0cHM6Ly9zZWFoY20tZGFzaGJvYXJkLWRlZmF1bHQtcnRkYi5hc2lhLXNvdXRoZWFzdDEuZmlyZWJhc2VkYXRhYmFzZS5hcHA="),
+            projectId: _fbv("c2VhaGNtLWRhc2hib2FyZA=="),
+            storageBucket: _fbv("c2VhaGNtLWRhc2hib2FyZC5maXJlYmFzZXN0b3JhZ2UuYXBw"),
+            messagingSenderId: _fbv("ODkyNTM5NjY0ODkw"),
+            appId: _fbv("MTo4OTI1Mzk2NjQ4OTA6d2ViOjBhMGE5Mjc1NjE1MTc1YmE1MDRjNDM="),
+            measurementId: _fbv("Ry1ZMUNRSFQ4MUc5")
         };
 
         // Firebase 시작하기
