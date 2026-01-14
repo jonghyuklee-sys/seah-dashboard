@@ -14,6 +14,10 @@ body.is-admin .admin-hidden {
     /* 관리자일 때만 숨길 요소 (예: 로그인 버튼) */
 }
 
+.input-card {
+    align-self: flex-start;
+}
+
 .admin-badge {
     background: #ff4757;
     color: white;
@@ -347,6 +351,14 @@ h3 {
     font-size: 0.8rem;
     color: var(--seah-gray);
     margin-top: 5px;
+}
+
+.weather-sub-value {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--seah-gray);
+    opacity: 0.8;
+    margin-top: 2px;
 }
 
 .weather-forecast-grid {
@@ -1483,6 +1495,28 @@ h3 {
     font-size: 0.9rem;
     font-weight: 700;
     color: var(--seah-blue);
+}
+
+.forecast-humidity {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 10px;
+    background: #eef2f6;
+    border-radius: 8px;
+    margin-bottom: 15px;
+}
+
+.hum-label {
+    font-size: 0.75rem;
+    color: #666;
+    white-space: nowrap;
+}
+
+.hum-val {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--seah-navy);
 }
 
 .equipment-status {
