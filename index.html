@@ -269,10 +269,13 @@
                             <tr>
                                 <th>일시</th>
                                 <th>위치</th>
-                                <th>강판온도</th>
-                                <th>실내 온/습도</th>
-                                <th>실외 온/습도</th>
+                                <th>외온</th>
+                                <th>외습</th>
+                                <th>내온</th>
+                                <th>내습</th>
                                 <th>이슬점</th>
+                                <th>소재</th>
+                                <th>온도차</th>
                                 <th>상태</th>
                             </tr>
                         </thead>
@@ -298,10 +301,13 @@
                                 <tr>
                                     <th>일시</th>
                                     <th>위치</th>
-                                    <th>강판온도</th>
-                                    <th>실내 온/습도</th>
-                                    <th>실외 온/습도</th>
+                                    <th>외온</th>
+                                    <th>외습</th>
+                                    <th>내온</th>
+                                    <th>내습</th>
                                     <th>이슬점</th>
+                                    <th>소재</th>
+                                    <th>온도차</th>
                                     <th>상태</th>
                                 </tr>
                             </thead>
@@ -326,7 +332,13 @@
                                 <tr>
                                     <th>위치</th>
                                     <th>시간</th>
-                                    <th>환경 (강판/이슬점)</th>
+                                    <th>외온</th>
+                                    <th>외습</th>
+                                    <th>내온</th>
+                                    <th>내습</th>
+                                    <th>이슬점</th>
+                                    <th>소재</th>
+                                    <th>온도차</th>
                                     <th>GATE</th>
                                     <th>포장</th>
                                     <th>제품상태</th>
@@ -386,15 +398,16 @@
                             <span class="guide-icon">🔥</span>
                             <strong>열풍기 (결로 방지)</strong>
                         </div>
-                        <p class="guide-condition">배풍기 가동 후<br><strong>결로 발생 시</strong></p>
-                        <small>목적: 환기만으로 부족한 극한 환경 대응</small>
+                        <p class="guide-condition">일교차 <strong>10℃↑</strong> / 습도 <strong>80%↑</strong><br>또는
+                            <strong>8℃↑ & 70%↑</strong></p>
+                        <small>목적: 고위험군 결로 수동/자동 억제</small>
                     </div>
                     <div class="guide-item guide-fan">
                         <div class="guide-header">
                             <span class="guide-icon">🌀</span>
                             <strong>배풍기 (환기)</strong>
                         </div>
-                        <p class="guide-condition">일교차 <strong>10℃ 이상</strong><br>또는 습도 <strong>90% 이상</strong></p>
+                        <p class="guide-condition">일교차 <strong>8℃ 이상</strong><br>또는 습도 <strong>70% 이상</strong></p>
                         <small>목적: 공기 순환 및 결로 예방</small>
                     </div>
                 </div>
@@ -415,13 +428,38 @@
                     style="color: var(--seah-orange); border-color: var(--seah-orange);">➕ 과거 기록 등록</button>
             </div>
 
+            <!-- 결로 발생 환경 분석 요약 섹션 -->
+            <div id="history-analysis-container" class="analysis-summary-grid mt-md">
+                <div class="analysis-card active-card">
+                    <div class="analysis-label">총 발생 횟수</div>
+                    <div class="analysis-value" id="stat-total-count">- 건</div>
+                    <div class="analysis-desc">기점: 수동 등록 및 점검 결과 합계</div>
+                </div>
+                <div class="analysis-card">
+                    <div class="analysis-label">주요 발생 외기온도</div>
+                    <div class="analysis-value" id="stat-avg-outdoor-temp">- °C</div>
+                    <div class="analysis-desc">최빈 발생 구간 분석 결과</div>
+                </div>
+                <div class="analysis-card">
+                    <div class="analysis-label">평균 발생 외기습도</div>
+                    <div class="analysis-value" id="stat-avg-outdoor-hum">- %</div>
+                    <div class="analysis-desc">기상 예보 연동 시 주요 선행 지표</div>
+                </div>
+                <div class="analysis-card warning-card">
+                    <div class="analysis-label">평균 온도차 (소재-이슬점)</div>
+                    <div class="analysis-value" id="stat-avg-diff">- °C</div>
+                    <div class="analysis-desc">발생 시 평균 이슬점 근접도</div>
+                </div>
+            </div>
+
             <div class="table-container mt-md">
                 <table class="report-table">
                     <thead>
                         <tr>
                             <th>발생일시</th>
                             <th>위치</th>
-                            <th title="외기온도/습도">외온/습</th>
+                            <th title="외기온도">외온</th>
+                            <th title="외기습도">외습</th>
                             <th title="실내온도">내온</th>
                             <th title="실내습도">내습</th>
                             <th>이슬점</th>

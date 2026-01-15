@@ -6,7 +6,13 @@
 
 body.is-admin .admin-only {
     display: inline-block !important;
-    /* 관리자 로그인 시 보임 */
+    /* 기본 요소용 */
+}
+
+/* 테이블 전용 관리자 요소 처리 */
+body.is-admin th.admin-only,
+body.is-admin td.admin-only {
+    display: table-cell !important;
 }
 
 body.is-admin .admin-hidden {
@@ -2157,4 +2163,180 @@ h3 {
 .side-right .history-card {
     flex-grow: 1;
     margin-bottom: 0;
+}
+
+/* 결로 이력 테이블 최적화 - 화면 깨짐 수정 및 글씨 크기 통일 */
+#history-view .table-container {
+    overflow-x: auto;
+    background: white;
+    border: 1px solid #eef2f6;
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+
+.report-table {
+    width: 100%;
+    min-width: 1100px;
+    table-layout: auto;
+    font-size: 0.85rem;
+    border-collapse: collapse;
+}
+
+.report-table th,
+.report-table td {
+    padding: 12px 10px !important;
+    text-align: center;
+    /* 기본 중앙 정렬 */
+    border-bottom: 1px solid #f1f4f8;
+    vertical-align: middle;
+}
+
+.report-table th {
+    background: var(--seah-navy);
+    color: white;
+    font-weight: 700;
+}
+
+/* 특정 열 스타일 조정 - 균등하고 보기 좋은 폭 배분 */
+.report-table th:nth-child(1),
+.report-table td:nth-child(1) {
+    width: 160px;
+}
+
+/* 발생일시 */
+.report-table th:nth-child(2),
+.report-table td:nth-child(2) {
+    width: 200px;
+}
+
+/* 위치 */
+
+/* 수치 데이터 열들 (외온~온도차) - 균등 배치 */
+.report-table th:nth-child(3),
+.report-table td:nth-child(3),
+.report-table th:nth-child(4),
+.report-table td:nth-child(4),
+.report-table th:nth-child(5),
+.report-table td:nth-child(5),
+.report-table th:nth-child(6),
+.report-table td:nth-child(6),
+.report-table th:nth-child(7),
+.report-table td:nth-child(7),
+.report-table th:nth-child(8),
+.report-table td:nth-child(8),
+.report-table th:nth-child(9),
+.report-table td:nth-child(9) {
+    width: 160px;
+}
+
+/* 발생원인 - 남은 공간 활용 */
+.report-table th:nth-child(10),
+.report-table td:nth-child(10) {
+    white-space: normal;
+    min-width: 150px;
+    text-align: center;
+}
+
+.report-table td.admin-only {
+    width: 160px;
+    white-space: nowrap;
+}
+
+/* 버튼 컨테이너 */
+.report-table .action-btns {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    align-items: center;
+}
+
+.report-table .btn-mini {
+    padding: 6px 12px;
+    font-size: 0.85rem;
+    border-radius: 6px;
+    cursor: pointer;
+    border: none;
+    font-weight: 600;
+    transition: all 0.2s;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 60px;
+}
+
+.report-table .btn-edit {
+    background-color: var(--seah-blue);
+    color: white;
+}
+
+.report-table .btn-edit:hover {
+    background-color: #004a8d;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+.report-table .btn-delete {
+    background-color: #dc3545;
+    color: white;
+}
+
+.report-table .btn-delete:hover {
+    background-color: #c82333;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+/* 결로 분석 요약 카드 스타일 */
+.analysis-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px;
+    margin-bottom: 25px;
+}
+
+.analysis-card {
+    background: #ffffff;
+    border: 1px solid #e1e8f0;
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.03);
+    transition: all 0.3s ease;
+}
+
+.analysis-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 15px rgba(0, 0, 0, 0.08);
+}
+
+.analysis-card.active-card {
+    border-top: 4px solid var(--seah-blue);
+}
+
+.analysis-card.warning-card {
+    border-top: 4px solid var(--status-danger);
+}
+
+.analysis-label {
+    font-size: 0.95rem;
+    color: #64748b;
+    margin-bottom: 10px;
+    font-weight: 600;
+}
+
+.analysis-value {
+    font-size: 1.8rem;
+    color: var(--seah-navy);
+    font-weight: 800;
+    margin-bottom: 5px;
+}
+
+.analysis-desc {
+    font-size: 0.8rem;
+    color: #94a3b8;
+}
+
+@media (max-width: 992px) {
+    .analysis-summary-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
 }

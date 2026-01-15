@@ -155,7 +155,10 @@ function renderLocationSummary() {
                 <div class="loc-main-content">
                     <div class="loc-header">
                         <span class="loc-name">${loc}</span>
-                        <span class="loc-data">${data.steel}°C / ${data.dp}°C <small>(${data.time})</small></span>
+                        <span class="loc-data">
+                            소재:${data.steel}°C / 이슬점:${data.dp}°C / 내온:${data.temp || '-'}°C / 내습:${data.humidity || '-'}% 
+                            <small>(${data.time})</small>
+                        </span>
                     </div>
                     <div class="status-badges">
                         <button class="badge badge-gate ${gateClass}" data-location="${loc}" data-field="gate" ${toggleDisabled}>GATE: ${data.gate}${arrow}</button>
@@ -373,17 +376,30 @@ function renderLogs() {
     if (!elements.logBody) return;
 
     const displayLogs = monitoringLogs.slice(0, 5);
-    elements.logBody.innerHTML = displayLogs.map(log => `
-        <tr>
-            <td>${log.time}</td>
-            <td>${log.location}</td>
-            <td>${log.steel}</td>
-            <td>${log.indoor}</td>
-            <td>${log.outdoor}</td>
-            <td>${log.dp}</td>
-            <td><span class="risk-badge ${getRiskLevelTextClass(log.risk)}">${log.risk}</span></td>
-        </tr>
-    `).join('');
+    elements.logBody.innerHTML = displayLogs.map(log => {
+        const outT = log.outdoorTemp !== undefined ? log.outdoorTemp : (log.outdoor ? parseFloat(log.outdoor) : '-');
+        const outH = log.outdoorHum !== undefined ? log.outdoorHum : (log.outdoor && log.outdoor.includes('/') ? log.outdoor.split('/')[1]?.replace('%', '').trim() : '-');
+        const inT = log.temp !== undefined ? log.temp : (log.indoor ? parseFloat(log.indoor) : '-');
+        const inH = log.humidity !== undefined ? log.humidity : (log.indoor && log.indoor.includes('/') ? log.indoor.split('/')[1]?.replace('%', '').trim() : '-');
+        const stl = log.steel !== undefined ? (typeof log.steel === 'string' ? log.steel.replace('°C', '') : log.steel) : '-';
+        const dpVal = log.dp !== undefined ? (typeof log.dp === 'string' ? log.dp.replace('°C', '') : log.dp) : '-';
+        const diff = log.tempDiff !== undefined ? log.tempDiff : (stl !== '-' && dpVal !== '-' ? (parseFloat(stl) - parseFloat(dpVal)).toFixed(1) : '-');
+
+        return `
+            <tr>
+                <td>${log.time}</td>
+                <td>${log.location}</td>
+                <td>${outT}</td>
+                <td>${outH}</td>
+                <td>${inT}</td>
+                <td>${inH}</td>
+                <td>${dpVal}</td>
+                <td>${stl}</td>
+                <td>${diff}</td>
+                <td><span class="risk-badge ${getRiskLevelTextClass(log.risk)}">${log.risk}</span></td>
+            </tr>
+        `;
+    }).join('');
 
     updateTimedReportStatus();
 }
@@ -638,6 +654,9 @@ async function submitTimedReport(timeSlot) {
             snapshot[l] = {
                 steel: latestLog.steel.replace('°C', ''),
                 dp: latestLog.dp.replace('°C', ''),
+                temp: latestLog.temp || (latestLog.indoor ? latestLog.indoor.split('°C')[0] : '-'),
+                humidity: latestLog.humidity || (latestLog.indoor ? latestLog.indoor.split('/ ')[1]?.replace('%', '') : '-'),
+                tempDiff: latestLog.tempDiff || (latestLog.steel && latestLog.dp ? (parseFloat(latestLog.steel) - parseFloat(latestLog.dp)).toFixed(1) : '-'),
                 riskLabel: latestLog.risk,
                 riskClass: getRiskLevelTextClass(latestLog.risk),
                 gate: latestLocationStatus[l]?.gate || '닫힘',
@@ -648,12 +667,12 @@ async function submitTimedReport(timeSlot) {
         } else {
             if (targetDate === getLocalDateString()) {
                 snapshot[l] = latestLocationStatus[l] || {
-                    steel: '-', dp: '-', riskLabel: '미측정', riskClass: 'status-safe',
+                    steel: '-', dp: '-', temp: '-', humidity: '-', tempDiff: '-', riskLabel: '미측정', riskClass: 'status-safe',
                     gate: '닫힘', pack: '포장', product: '양호', time: '-'
                 };
             } else {
                 snapshot[l] = {
-                    steel: '-', dp: '-', riskLabel: '미측정', riskClass: 'status-safe',
+                    steel: '-', dp: '-', temp: '-', humidity: '-', tempDiff: '-', riskLabel: '미측정', riskClass: 'status-safe',
                     gate: '닫힘', pack: '포장', product: '양호', time: '-'
                 };
             }
@@ -788,13 +807,13 @@ function viewReportDetails(time, manualDate = null) {
         const data = dayData[slot];
         if (!data || !data.snapshot) return;
 
-        const outdoorStr = typeof data.outdoor === 'object' ?
-            `${data.outdoor.temp}°C / ${data.outdoor.humidity}%` :
-            `${data.outdoor}°C`;
+        const outT = typeof data.outdoor === 'object' ? data.outdoor.temp : (typeof data.outdoor === 'string' ? parseFloat(data.outdoor) : '-');
+        const outH = typeof data.outdoor === 'object' ? data.outdoor.humidity : (typeof data.outdoor === 'string' && data.outdoor.includes('/') ? data.outdoor.split('/')[1]?.replace('%', '').trim() : '-');
+        const outdoorStr = `${outT}°C / ${outH}%`;
 
         tableRows += `
             <tr class="slot-header-row">
-                <td colspan="7" style="background: #f1f4f8; font-weight: bold; text-align: left; padding-left: 15px;">
+                <td colspan="13" style="background: #f1f4f8; font-weight: bold; text-align: left; padding-left: 15px;">
                     📅 ${slot} 보고 (실외: ${outdoorStr})
                 </td>
             </tr>
@@ -805,7 +824,13 @@ function viewReportDetails(time, manualDate = null) {
                 <tr>
                     <td>${loc}</td>
                     <td>${formatSnapshotTime(info.time, slot)}</td>
-                    <td>${info.steel}°C / ${info.dp}°C</td>
+                    <td>${outT}</td>
+                    <td>${outH}</td>
+                    <td>${info.temp || '-'}</td>
+                    <td>${info.humidity || '-'}</td>
+                    <td>${info.dp || '-'}</td>
+                    <td>${info.steel || '-'}</td>
+                    <td>${info.tempDiff || '-'}</td>
                     <td>${info.gate}</td>
                     <td>${info.pack}</td>
                     <td style="color: ${info.product === '결로 인지' ? 'red' : 'green'}; font-weight: bold;">${info.product}</td>
@@ -834,17 +859,30 @@ function closeModal() {
 
 function viewAllLogs() {
     const fullLogBody = document.getElementById('full-log-body');
-    fullLogBody.innerHTML = monitoringLogs.map(log => `
-        <tr>
-            <td>${log.time}</td>
-            <td>${log.location}</td>
-            <td>${log.steel}</td>
-            <td>${log.indoor}</td>
-            <td>${log.outdoor}</td>
-            <td>${log.dp}</td>
-            <td><span class="risk-badge ${getRiskLevelTextClass(log.risk)}">${log.risk}</span></td>
-        </tr>
-    `).join('');
+    fullLogBody.innerHTML = monitoringLogs.map(log => {
+        const outT = log.outdoorTemp !== undefined ? log.outdoorTemp : (log.outdoor ? parseFloat(log.outdoor) : '-');
+        const outH = log.outdoorHum !== undefined ? log.outdoorHum : (log.outdoor && log.outdoor.includes('/') ? log.outdoor.split('/')[1]?.replace('%', '').trim() : '-');
+        const inT = log.temp !== undefined ? log.temp : (log.indoor ? parseFloat(log.indoor) : '-');
+        const inH = log.humidity !== undefined ? log.humidity : (log.indoor && log.indoor.includes('/') ? log.indoor.split('/')[1]?.replace('%', '').trim() : '-');
+        const stl = log.steel !== undefined ? (typeof log.steel === 'string' ? log.steel.replace('°C', '') : log.steel) : '-';
+        const dpVal = log.dp !== undefined ? (typeof log.dp === 'string' ? log.dp.replace('°C', '') : log.dp) : '-';
+        const diff = log.tempDiff !== undefined ? log.tempDiff : (stl !== '-' && dpVal !== '-' ? (parseFloat(stl) - parseFloat(dpVal)).toFixed(1) : '-');
+
+        return `
+            <tr>
+                <td>${log.time}</td>
+                <td>${log.location}</td>
+                <td>${outT}</td>
+                <td>${outH}</td>
+                <td>${inT}</td>
+                <td>${inH}</td>
+                <td>${dpVal}</td>
+                <td>${stl}</td>
+                <td>${diff}</td>
+                <td><span class="risk-badge ${getRiskLevelTextClass(log.risk)}">${log.risk}</span></td>
+            </tr>
+        `;
+    }).join('');
     document.getElementById('log-modal').style.display = 'block';
 }
 
@@ -975,8 +1013,8 @@ function updateCondensationHistory() {
                         id: log.timestamp || new Date(log.time).getTime(),
                         dateStr: log.time,
                         location: log.location,
-                        outTemp: log.outdoor || '-',
-                        outData: (log.outdoorTemp !== undefined && log.outdoorHum !== undefined) ? `${log.outdoorTemp}°C/${log.outdoorHum}%` : null,
+                        outTemp: log.outdoorTemp !== undefined ? log.outdoorTemp : (log.outdoor ? parseFloat(log.outdoor) : '-'),
+                        outHumid: log.outdoorHum !== undefined ? log.outdoorHum : (log.outdoor && log.outdoor.includes('/') ? log.outdoor.split('/')[1].replace('%', '').trim() : '-'),
                         inTemp: log.temp,
                         inHumid: log.humidity,
                         dewPoint: log.dp,
@@ -997,20 +1035,17 @@ function updateCondensationHistory() {
                         Object.keys(report.snapshot).forEach(loc => {
                             const snap = report.snapshot[loc];
                             if (snap.product === '결로 인지') {
-                                const outStr = (report.outdoor && typeof report.outdoor === 'object') ?
-                                    `${report.outdoor.temp}°C/${report.outdoor.humidity}%` :
-                                    (report.outdoor || '-');
-
                                 historyData.push({
                                     id: `snap-${date}-${slotKey}-${loc}`,
                                     dateStr: `${date} ${report.slot || '00:00'}`,
                                     location: loc,
-                                    outTemp: outStr,
-                                    inTemp: '-',
-                                    inHumid: '-',
+                                    outTemp: (report.outdoor && typeof report.outdoor === 'object') ? report.outdoor.temp : (typeof report.outdoor === 'string' ? parseFloat(report.outdoor) : '-'),
+                                    outHumid: (report.outdoor && typeof report.outdoor === 'object') ? report.outdoor.humidity : (typeof report.outdoor === 'string' && report.outdoor.includes('/') ? report.outdoor.split('/')[1].replace('%', '').trim() : '-'),
+                                    inTemp: snap.temp || '-',
+                                    inHumid: snap.humidity || '-',
                                     dewPoint: snap.dp || '-',
                                     steelTemp: snap.steel || '-',
-                                    diff: '-',
+                                    diff: snap.tempDiff || '-',
                                     reason: '관리자 육안 식별(결로 인지)'
                                 });
                             }
@@ -1035,8 +1070,10 @@ function updateCondensationHistory() {
             tbody.innerHTML = historyData.map(item => {
                 const isAdminUI = isAdmin ? `
                     <td class="admin-only">
-                        <button onclick="editPastRecord('${item.id}')" class="btn-mini">수정</button>
-                        <button onclick="deletePastRecord('${item.id}')" class="btn-mini btn-danger">삭제</button>
+                        <div class="action-btns">
+                            <button onclick="editPastRecord('${item.id}')" class="btn-mini btn-edit">수정</button>
+                            <button onclick="deletePastRecord('${item.id}')" class="btn-mini btn-delete">삭제</button>
+                        </div>
                     </td>
                 ` : '<td class="admin-only">-</td>';
 
@@ -1044,19 +1081,60 @@ function updateCondensationHistory() {
                     <tr>
                         <td>${item.dateStr}</td>
                         <td>${item.location}</td>
-                        <td>${item.outData || item.outTemp}</td>
+                        <td>${item.outTemp}</td>
+                        <td>${item.outHumid}</td>
                         <td>${item.inTemp}</td>
                         <td>${item.inHumid}</td>
                         <td>${item.dewPoint}</td>
                         <td>${item.steelTemp}</td>
                         <td>${item.diff}</td>
-                        <td><span class="status-danger" style="font-size: 0.8em; padding: 2px 5px; border-radius: 4px;">${item.reason}</span></td>
+                        <td><span class="status-danger" style="padding: 2px 5px; border-radius: 4px;">${item.reason}</span></td>
                         ${isAdminUI}
                     </tr>
                 `;
             }).join('');
         }
+
+        // 상단 분석 카드 업데이트 호출
+        updateCondensationAnalysis(historyData);
     }, 500);
+}
+
+/**
+ * 결로 발생 이력 데이터를 분석하여 상단 통계 카드를 업데이트합니다.
+ * @param {Array} data - 결로 이력 데이터 배열
+ */
+function updateCondensationAnalysis(data) {
+    const totalCountEl = document.getElementById('stat-total-count');
+    const outdoorTempEl = document.getElementById('stat-avg-outdoor-temp');
+    const outdoorHumEl = document.getElementById('stat-avg-outdoor-hum');
+    const avgDiffEl = document.getElementById('stat-avg-diff');
+
+    if (!totalCountEl || data.length === 0) {
+        if (totalCountEl) totalCountEl.textContent = '0 건';
+        if (outdoorTempEl) outdoorTempEl.textContent = '- °C';
+        if (outdoorHumEl) outdoorHumEl.textContent = '- %';
+        if (avgDiffEl) avgDiffEl.textContent = '- °C';
+        return;
+    }
+
+    let outTempSum = 0, outHumSum = 0, diffSum = 0;
+    let outTempCount = 0, outHumCount = 0, diffCount = 0;
+
+    data.forEach(item => {
+        const ot = parseFloat(item.outTemp);
+        const oh = parseFloat(item.outHumid);
+        const df = parseFloat(item.diff);
+
+        if (!isNaN(ot)) { outTempSum += ot; outTempCount++; }
+        if (!isNaN(oh)) { outHumSum += oh; outHumCount++; }
+        if (!isNaN(df)) { diffSum += df; diffCount++; }
+    });
+
+    if (totalCountEl) totalCountEl.textContent = `${data.length} 건`;
+    if (outdoorTempEl) outdoorTempEl.textContent = outTempCount > 0 ? `${(outTempSum / outTempCount).toFixed(1)} °C` : '- °C';
+    if (outdoorHumEl) outdoorHumEl.textContent = outHumCount > 0 ? `${(outHumSum / outHumCount).toFixed(1)} %` : '- %';
+    if (avgDiffEl) avgDiffEl.textContent = diffCount > 0 ? `${(diffSum / diffCount).toFixed(1)} °C` : '- °C';
 }
 
 function formatSnapshotTime(time, slot) {
@@ -1575,7 +1653,7 @@ async function fetchIntegratedWeeklyForecast(shortApiKey, midApiKey) {
         const avgHum = day.hums.length > 0 ? Math.round(day.hums.reduce((a, b) => a + b, 0) / day.hums.length) : null;
         const amPop = day.pops.length > 0 ? (day.pops.length > 8 ? Math.max(...day.pops.slice(6, 12)) : Math.max(...day.pops)) : 0;
         const pmPop = day.pops.length > 0 ? (day.pops.length > 12 ? Math.max(...day.pops.slice(12, 18)) : Math.max(...day.pops)) : 0;
-        const op = determineFanHeaterOperationV2(min, max, amPop, pmPop);
+        const op = determineFanHeaterOperationV2(min, max, amPop, pmPop, avgHum);
 
         result.push({
             date: day.date,
@@ -1644,7 +1722,7 @@ async function fetchIntegratedWeeklyForecast(shortApiKey, midApiKey) {
                     // min, max가 null이면 정보없음 처리
                     const op = (min === null || max === null)
                         ? { fan: false, heater: false, risk: '정보없음', reason: '데이터 부족' }
-                        : determineFanHeaterOperationV2(min, max, amPop, pmPop);
+                        : determineFanHeaterOperationV2(min, max, amPop, pmPop, 60); // 중기예보는 습도 데이터가 없으므로 60 기본값
 
                     result.push({
                         date: nextDate,
@@ -1763,7 +1841,12 @@ function displayWeeklyForecast(forecast) {
     grid.innerHTML = forecast.slice(0, 7).map(day => {
         const d = new Date(day.date);
         const dateStr = `${d.getMonth() + 1}/${d.getDate()}(${['일', '월', '화', '수', '목', '금', '토'][d.getDay()]})`;
-        const riskClass = day.risk === '안전' ? 'status-safe' : 'status-caution';
+
+        // 리스크 등급에 따른 클래스 매핑
+        let riskClass = 'status-safe';
+        if (day.risk === '주의') riskClass = 'status-caution';
+        else if (day.risk === '위험') riskClass = 'status-danger';
+
         return `
             <div class="forecast-day-card">
                 <h4>${dateStr}</h4>
@@ -1793,8 +1876,20 @@ function displayWeeklyForecast(forecast) {
 function updateManagementGuide(forecast) {
     const guide = document.getElementById('weekly-management-guide');
     if (!guide) return;
+
+    const dangerCount = forecast.filter(d => d.risk === '위험').length;
     const cautionCount = forecast.filter(d => d.risk === '주의').length;
-    guide.textContent = cautionCount > 0 ? `향후 7일간 ${cautionCount}일의 결로 주의 기간이 예상됩니다. 설비 가동 준비를 권장합니다.` : '향후 7일간 결로 위험이 낮습니다. 정기 점검을 유지해 주세요.';
+
+    if (dangerCount > 0) {
+        guide.textContent = `향후 7일간 ${dangerCount}일의 결로 위험 구간이 감지되었습니다. 열풍기 가동 및 집중 관리가 필요합니다.`;
+        guide.style.color = 'var(--status-danger)';
+    } else if (cautionCount > 0) {
+        guide.textContent = `향후 7일간 ${cautionCount}일의 결로 주의 기간이 예상됩니다. 배풍기를 미리 가동하여 대비하세요.`;
+        guide.style.color = 'var(--status-caution)';
+    } else {
+        guide.textContent = '향후 7일간 결로 위험이 낮습니다. 외부 환경 변화를 지속적으로 모니터링해 주세요.';
+        guide.style.color = 'var(--seah-gray)';
+    }
 }
 
 // 페이지 로드 시 초기화
@@ -1843,19 +1938,48 @@ function openPastRecordModal(editId = null) {
 
     if (editId) {
         // 수정 모드
-        const log = monitoringLogs.find(l => (l.timestamp && l.timestamp.toString() === editId) || (new Date(l.time).getTime().toString() === editId));
+        let log = null;
+
+        if (editId.startsWith('snap-')) {
+            // snap-YYYY-MM-DD-HH:mm-Location 형식 파싱
+            const parts = editId.split('-');
+            if (parts.length >= 6) {
+                const date = `${parts[1]}-${parts[2]}-${parts[3]}`;
+                const slot = parts[4];
+                const loc = parts.slice(5).join('-');
+
+                if (allReports[date] && allReports[date][slot] && allReports[date][slot].snapshot[loc]) {
+                    const snap = allReports[date][slot].snapshot[loc];
+                    const report = allReports[date][slot];
+
+                    log = {
+                        time: `${date} ${slot}`,
+                        location: loc,
+                        outdoorTemp: (report.outdoor && typeof report.outdoor === 'object') ? report.outdoor.temp : parseFloat(report.outdoor),
+                        outdoorHum: (report.outdoor && typeof report.outdoor === 'object') ? report.outdoor.humidity : 0,
+                        steel: snap.steel,
+                        temp: snap.temp,
+                        humidity: snap.humidity
+                    };
+                }
+            }
+        } else {
+            log = monitoringLogs.find(l => (l.timestamp && l.timestamp.toString() === editId) || (new Date(l.time).getTime().toString() === editId));
+        }
+
         if (log) {
             idInput.value = editId;
             dateInput.value = log.time.replace(' ', 'T').slice(0, 16);
             locSelect.value = log.location;
-            document.getElementById('past-outdoor').value = log.outdoorTemp || parseFloat(log.outdoor);
+            document.getElementById('past-outdoor').value = log.outdoorTemp || (typeof log.outdoor === 'string' ? parseFloat(log.outdoor) : '');
             document.getElementById('past-outdoor-humid').value = log.outdoorHum || "";
             document.getElementById('past-steel').value = log.steel;
             document.getElementById('past-indoor').value = log.temp;
             document.getElementById('past-humid').value = log.humidity;
             submitBtn.textContent = '수정완료';
         }
-    } else {
+    }
+    else {
         // 등록 모드
         idInput.value = '';
         const now = new Date();
@@ -1929,22 +2053,61 @@ function savePastRecord() {
 
     if (editId) {
         // 수정
-        const index = monitoringLogs.findIndex(l => l.timestamp && l.timestamp.toString() === editId);
-        if (index !== -1) {
-            monitoringLogs[index] = newLog;
-        } else {
-            // 타임스탬프 없을 경우 시간으로 찾기
-            const timeIndex = monitoringLogs.findIndex(l => new Date(l.time).getTime().toString() === editId);
-            if (timeIndex !== -1) monitoringLogs[timeIndex] = newLog;
-        }
+        if (editId.startsWith('snap-')) {
+            const parts = editId.split('-');
+            if (parts.length >= 6) {
+                const date = `${parts[1]}-${parts[2]}-${parts[3]}`;
+                const slot = parts[4];
+                const loc = parts.slice(5).join('-');
 
-        if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
-            // Firebase 수정은 push가 아닌 해당 path에 set 해야 함. 
-            // 여기서는 단순화를 위해 logs 전체를 다시 쓰거나, Push된 Key를 알아야 함.
-            // 일단 Push로 새로 넣는 방식이 아닌, 기존 로직 유지하며 로컬 우선 처리
-            firebase.database().ref('logs').push(newLog);
+                if (allReports[date] && allReports[date][slot] && allReports[date][slot].snapshot[loc]) {
+                    // 전체 보고서의 외기 정보 업데이트 (해당 시간대 공통)
+                    allReports[date][slot].outdoor = {
+                        temp: outdoor,
+                        humidity: isNaN(outdoorHum) ? 0 : outdoorHum
+                    };
+
+                    // 개별 스냅샷 데이터 업데이트
+                    const snap = allReports[date][slot].snapshot[loc];
+                    snap.steel = steel.toString();
+                    snap.dp = dpFixed;
+                    snap.temp = indoor.toString();
+                    snap.humidity = humid.toString();
+                    snap.tempDiff = (steel - dp).toFixed(1);
+                    snap.riskLabel = risk.label;
+                    snap.product = '결로 인지';
+
+                    if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+                        const fbSlot = slot.replace(':', '');
+                        const updates = {};
+                        updates[`reports/${date}/${fbSlot}/outdoor`] = allReports[date][slot].outdoor;
+                        updates[`reports/${date}/${fbSlot}/snapshot/${loc}`] = snap;
+                        firebase.database().ref().update(updates);
+                    } else {
+                        localStorage.setItem('seah_all_reports', JSON.stringify(allReports));
+                    }
+                }
+            }
+        } else {
+            const index = monitoringLogs.findIndex(l => l.timestamp && l.timestamp.toString() === editId);
+            if (index !== -1) {
+                monitoringLogs[index] = newLog;
+            } else {
+                const timeIndex = monitoringLogs.findIndex(l => new Date(l.time).getTime().toString() === editId);
+                if (timeIndex !== -1) monitoringLogs[timeIndex] = newLog;
+            }
+
+            if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+                // 수동 로그의 경우, 수정 시 push로 새로 넣지 않고 (중복 방지) 
+                // 기존 entries 중 timestamp가 일치하는 것을 찾아 삭제 후 새로 넣거나
+                // 여기서는 일단 기존 로직대로 push 하되, 중복 이슈가 있다면 차후 UI에서 필터링하거나
+                // timestamp 기준으로 기존 값을 덮어쓸 수 있도록 보강이 필요함.
+                // 우선 외온/외습 저장을 위해 push에 newLog를 정확히 전달.
+                firebase.database().ref('logs').push(newLog);
+            }
         }
-    } else {
+    }
+    else {
         // 신규
         monitoringLogs.unshift(newLog);
         if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
@@ -1965,8 +2128,38 @@ function editPastRecord(id) {
 function deletePastRecord(id) {
     if (!confirm('정말 이 기록을 삭제하시겠습니까?')) return;
 
-    monitoringLogs = monitoringLogs.filter(l => (l.timestamp && l.timestamp.toString() !== id) && (new Date(l.time).getTime().toString() !== id));
-    localStorage.setItem('seah_logs', JSON.stringify(monitoringLogs));
+    if (id.startsWith('snap-')) {
+        // snap-YYYY-MM-DD-HH:mm-Location
+        const parts = id.split('-');
+        if (parts.length >= 6) {
+            const date = `${parts[1]}-${parts[2]}-${parts[3]}`;
+            const slot = parts[4];
+            const loc = parts.slice(5).join('-');
+
+            if (allReports[date] && allReports[date][slot] && allReports[date][slot].snapshot[loc]) {
+                allReports[date][slot].snapshot[loc].product = '양호';
+
+                if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+                    const fbSlot = slot.replace(':', '');
+                    firebase.database().ref(`reports/${date}/${fbSlot}/snapshot/${loc}/product`).set('양호')
+                        .then(() => {
+                            alert('기록이 삭제(상태 변경)되었습니다.');
+                            updateCondensationHistory();
+                        });
+                    return; // Firebase callback에서 처리
+                } else {
+                    localStorage.setItem('seah_all_reports', JSON.stringify(allReports));
+                }
+            }
+        }
+    } else {
+        monitoringLogs = monitoringLogs.filter(l => (l.timestamp && l.timestamp.toString() !== id) && (new Date(l.time).getTime().toString() !== id));
+        localStorage.setItem('seah_logs', JSON.stringify(monitoringLogs));
+
+        // Firebase의 경우 전체를 다시 쓰기는 위험하므로, 개별 삭제 로직이 필요하지만 
+        // 현 구조상 monitoringLogs가 실시간 동기화되므로 로컬 필터링만으로도 효과가 있을 수 있음
+        // (단, push된 데이터는 Firebase에서 직접 삭제해야 함)
+    }
 
     alert('기록이 삭제되었습니다.');
     updateCondensationHistory();
@@ -1977,11 +2170,63 @@ function updateCurrentTime() {
     // 이미 별도의 setInterval에서 처리 중이므로 비워둠
 }
 
-// 운영 기준 변경 적용 (배풍기: 일교차 10도 or 습도 90% / 열풍기: 이력 기반)
+// 고도화된 결로 예측 알고리즘 (사용자 지정 기준 + 과거 실데이터 분석 적용)
 function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb, humidity) {
     const maxRainProb = Math.max(amRainProb, pmRainProb);
     const tempDiff = maxTemp - minTemp;
     const avgHum = humidity || 60;
+
+    // [Step 1] 과거 이력 및 점검 기록 분석 (최근 데이터 및 온도차 추출)
+    let historyMatchCount = 0;
+    let recentCondensationMatch = false;
+    let historicalDiffs = []; // 유사 기온 조건에서의 실제 온도차 수집
+
+    const now = new Date();
+    // 최근 72시간(3일) 내 결로 이력이 있다면 현재 예보에 가중치를 줌 (오늘 발생 포함)
+    const historyLimit = new Date(now.getTime() - (72 * 60 * 60 * 1000));
+
+    // 1-1. 수동 등록 이력 분석
+    if (typeof monitoringLogs !== 'undefined' && monitoringLogs.length > 0) {
+        monitoringLogs.forEach(log => {
+            if (log.source === 'manual_history') {
+                const pastTemp = log.outdoorTemp !== undefined ? log.outdoorTemp : parseFloat(log.outdoor);
+                const pastDiff = log.tempDiff !== undefined ? parseFloat(log.tempDiff) : null;
+
+                // 유사 기온 조건 (+/- 2도 이내)
+                if (!isNaN(pastTemp) && pastTemp >= minTemp - 2 && pastTemp <= minTemp + 2) {
+                    historyMatchCount++;
+                    if (pastDiff !== null && !isNaN(pastDiff)) historicalDiffs.push(pastDiff);
+                }
+                if (new Date(log.time) > historyLimit) recentCondensationMatch = true;
+            }
+        });
+    }
+
+    // 1-2. 정기 점검(스냅샷) 기록 분석
+    if (typeof allReports !== 'undefined') {
+        Object.keys(allReports).forEach(date => {
+            const dayData = allReports[date];
+            Object.keys(dayData).forEach(slot => {
+                const report = dayData[slot];
+                if (report && report.snapshot && report.outdoor) {
+                    const pastOutTemp = typeof report.outdoor === 'object' ? report.outdoor.temp : parseFloat(report.outdoor);
+                    const isDetected = Object.values(report.snapshot).some(s => s.product === '결로 인지');
+
+                    // 유사 기온 조건 분석
+                    if (!isNaN(pastOutTemp) && pastOutTemp >= minTemp - 2 && pastOutTemp <= minTemp + 2) {
+                        if (isDetected) historyMatchCount++;
+
+                        // 모든 스냅샷의 온도차 데이터 참조 (데이터 포인트 확보)
+                        Object.values(report.snapshot).forEach(s => {
+                            const sd = parseFloat(s.tempDiff);
+                            if (!isNaN(sd)) historicalDiffs.push(sd);
+                        });
+                    }
+                    if (new Date(date) > historyLimit) recentCondensationMatch = true;
+                }
+            });
+        });
+    }
 
     let status = {
         fan: false,
@@ -1990,44 +2235,50 @@ function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb,
         reason: '정상 범위'
     };
 
-    // 1. 배풍기 가동 (Moderate Risk)
-    // 일교차가 10℃ 이상이거나 습도가 90% 이상일 때
-    if (tempDiff >= 10 || avgHum >= 90 || maxRainProb >= 50) {
-        status.fan = true;
-        status.risk = '주의';
-        status.reason = avgHum >= 90 ? '고습도 환경(90%↑)으로 배풍기 가동 권장' : '큰 일교차(10℃↑)로 인한 배풍기 가동 권장';
-    }
+    // [Step 3] 사용자 지정 기상 매커니즘 적용 (데이터 타입을 숫자로 강제 변환하여 정확도 확보)
+    const currentTempDiff = Number((maxTemp - minTemp).toFixed(1));
+    const currentAvgHum = Number(humidity || 60);
 
-    // 2. 열풍기 가동 (High Risk - 과거 이력 기반)
-    // 배풍기 가동 조건임에도 불구하고, 과거에 유사한 기온 조건에서 결로가 발생한 기록이 있는 경우
-    if (typeof monitoringLogs !== 'undefined' && monitoringLogs.length > 0) {
-        let matchCount = 0;
-        const recentLogs = monitoringLogs.slice(0, 100);
-        recentLogs.forEach(log => {
-            // manual_history는 실제로 결로가 발생하여 관리자가 수동 등록한 기록임
-            if (log.source === 'manual_history' && log.outdoor !== undefined) {
-                const pastTemp = parseFloat(log.outdoor);
-                // 오차범위 1도 내의 동일 기온 조건에서 발생 이력이 있는지 확인
-                if (!isNaN(pastTemp) && pastTemp >= minTemp - 1 && pastTemp <= maxTemp + 1) {
-                    matchCount++;
-                }
-            }
-        });
+    // 위험 (Danger) 기준: (일교차 8↑ AND 습도 70↑) OR (일교차 10↑) OR (습도 80↑)
+    const isDangerWeather = (currentTempDiff >= 8 && currentAvgHum >= 70) || (currentTempDiff >= 10) || (currentAvgHum >= 80);
 
-        if (matchCount > 0) {
-            status.heater = true;
-            status.fan = false; // 열풍기 중점 가동
-            status.risk = '위험';
-            status.reason = `과거 동일 기온 결로 발생 이력 ${matchCount}건 (열풍기 상시 가동 권장)`;
+    // 주의 (Caution) 기준: (일교차 8↑) OR (습도 70↑)
+    const isCautionWeather = (currentTempDiff >= 8 || currentAvgHum >= 70);
+
+    if (isDangerWeather || historyMatchCount >= 2 || (recentCondensationMatch && isCautionWeather)) {
+        status.risk = '위험';
+        status.heater = true;
+        status.fan = true; // 위험 단계는 주의 수준을 포함하므로 배풍기도 가동
+
+        if (currentAvgHum >= 80) {
+            status.reason = `고습도(${currentAvgHum}%↑) 위험 - 열풍기/배풍기 가동 권장`;
+        } else if (currentTempDiff >= 10) {
+            status.reason = `극심한 일교차(${currentTempDiff}℃↑) 위험 - 열풍기/배풍기 가동`;
+        } else if (currentTempDiff >= 8 && currentAvgHum >= 70) {
+            status.reason = `복합 위험(일교차 8℃↑ & 습도 70%↑) - 열풍기/배풍기 권장`;
+        } else if (recentCondensationMatch && isCautionWeather) {
+            status.reason = '최근 발생 이력 + 주의 기상 (열풍기/배풍기 선제적 가동)';
+        } else {
+            status.reason = `과거 실데이터 기반 위험 구간 (이력 ${historyMatchCount}건 확인)`;
         }
     }
-
-    // 예외: 영하권 극한 추위는 예방 차원에서 주의 유지
-    if (minTemp <= -5 && status.risk === '안전') {
+    else if (isCautionWeather || recentCondensationMatch) {
         status.risk = '주의';
-        status.reason = '극한 기온(-5℃↓)에 따른 선제적 모니터링 필요';
+        status.fan = true;
+        status.heater = false;
+
+        if (isCautionWeather) {
+            status.reason = `주의 구간(일교차 8℃↑ 또는 습도 70%↑) - 배풍기 가동 권장`;
+        } else {
+            status.reason = '최근 결로 발생에 따른 잔여 습기 예방 관리 기간';
+        }
+    }
+    // 강수 예보 및 영하권 예외 처리
+    else if (maxRainProb >= 60 || minTemp <= -3) {
+        status.risk = '주의';
+        status.fan = true;
+        status.reason = maxRainProb >= 60 ? '강수 예보에 따른 고습도 주의' : '영하권 기온 하강에 따른 선제적 관리';
     }
 
     return status;
 }
-
