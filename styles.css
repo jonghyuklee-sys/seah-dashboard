@@ -134,8 +134,8 @@ body {
     color: var(--seah-gray);
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
-    zoom: 1.0;
-    /* 전체 화면 크기를 100%로 설정 */
+    zoom: 0.9;
+    /* 전체 화면 크기를 90%로 축소 */
 }
 
 .container {
