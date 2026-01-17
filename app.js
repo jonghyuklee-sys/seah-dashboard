@@ -1142,9 +1142,8 @@ function formatSnapshotTime(time, slot) {
     return time;
 }
 
-// 배풍기/열풍기 가동 판단 및 결로 위험도 평가 함수 (습도 반영)
+// 배풍기/열풍기 가동 판단 및 결로 위험도 평가 함수 (최신 V2 로직 사용)
 function determineFanHeaterOperation(minTemp, maxTemp, amRainProb, pmRainProb, humidity) {
-    // V2 로직으로 통합하여 처리
     return determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb, humidity);
 }
 
@@ -1756,7 +1755,7 @@ async function fetchIntegratedWeeklyForecast(shortApiKey, midApiKey) {
             const d = new Date(lastDate);
             const min = Math.floor(Math.random() * 5);
             const max = min + 7;
-            const op = determineFanHeaterOperation(min, max, 20, 20);
+            const op = determineFanHeaterOperationV2(min, max, 20, 20, 60);
             result.push({
                 date: d,
                 dateStr: d.toISOString().split('T')[0].replace(/-/g, ''),
@@ -1828,7 +1827,7 @@ function generateMockWeeklyForecast() {
             pmRainProb: 20,
             humidity: 60 + Math.floor(Math.random() * 20),
             weatherType: 'sunny',
-            ...op
+            ...determineFanHeaterOperationV2(min, max, 20, 20, 60),
         });
     }
     return forecast;
@@ -2193,11 +2192,11 @@ function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb,
                 const pastDiff = log.tempDiff !== undefined ? parseFloat(log.tempDiff) : null;
 
                 // 유사 기온 조건 (+/- 2도 이내)
-                if (!isNaN(pastTemp) && pastTemp >= minTemp - 2 && pastTemp <= minTemp + 2) {
+                if (log.risk === '위험' && !isNaN(pastTemp) && pastTemp >= minTemp - 2 && pastTemp <= minTemp + 2) {
                     historyMatchCount++;
                     if (pastDiff !== null && !isNaN(pastDiff)) historicalDiffs.push(pastDiff);
                 }
-                if (new Date(log.time) > historyLimit) recentCondensationMatch = true;
+                if (log.risk === '위험' && new Date(log.time) > historyLimit) recentCondensationMatch = true;
             }
         });
     }
@@ -2222,7 +2221,7 @@ function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb,
                             if (!isNaN(sd)) historicalDiffs.push(sd);
                         });
                     }
-                    if (new Date(date) > historyLimit) recentCondensationMatch = true;
+                    if (isDetected && new Date(date) > historyLimit) recentCondensationMatch = true;
                 }
             });
         });
@@ -2245,39 +2244,37 @@ function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb,
     // 주의 (Caution) 기준: (일교차 8↑) OR (습도 70↑)
     const isCautionWeather = (currentTempDiff >= 8 || currentAvgHum >= 70);
 
-    if (isDangerWeather || historyMatchCount >= 2 || (recentCondensationMatch && isCautionWeather)) {
+    // [Step 3] 설비 가동 기준 (UI 안내판 기준 엄격 적용)
+    const heaterWeather = (currentTempDiff >= 10) || (currentAvgHum >= 80) || (currentTempDiff >= 8 && currentAvgHum >= 70);
+    const fanWeather = (currentTempDiff >= 8) || (currentAvgHum >= 70);
+
+    // 위험 (Danger) 판정
+    if (isDangerWeather) {
         status.risk = '위험';
-        status.heater = true;
-        status.fan = true; // 위험 단계는 주의 수준을 포함하므로 배풍기도 가동
+        status.heater = heaterWeather;
+        status.fan = fanWeather;
 
-        if (currentAvgHum >= 80) {
-            status.reason = `고습도(${currentAvgHum}%↑) 위험 - 열풍기/배풍기 가동 권장`;
-        } else if (currentTempDiff >= 10) {
-            status.reason = `극심한 일교차(${currentTempDiff}℃↑) 위험 - 열풍기/배풍기 가동`;
-        } else if (currentTempDiff >= 8 && currentAvgHum >= 70) {
-            status.reason = `복합 위험(일교차 8℃↑ & 습도 70%↑) - 열풍기/배풍기 권장`;
-        } else if (recentCondensationMatch && isCautionWeather) {
-            status.reason = '최근 발생 이력 + 주의 기상 (열풍기/배풍기 선제적 가동)';
-        } else {
-            status.reason = `과거 실데이터 기반 위험 구간 (이력 ${historyMatchCount}건 확인)`;
-        }
+        if (currentAvgHum >= 80) status.reason = `고습도(${currentAvgHum}%↑) 위험`;
+        else if (currentTempDiff >= 10) status.reason = `극심한 일교차(${currentTempDiff}℃↑) 위험`;
+        else if (currentTempDiff >= 8 && currentAvgHum >= 70) status.reason = `복합 위험(일교차 8℃↑ & 습도 70%↑)`;
+        else status.reason = `기상 조건에 따른 결로 위험`;
     }
-    else if (isCautionWeather || recentCondensationMatch) {
+    // 주의 (Caution) 판정
+    else if (isCautionWeather || historyMatchCount >= 2 || recentCondensationMatch) {
         status.risk = '주의';
-        status.fan = true;
-        status.heater = false;
+        status.fan = fanWeather || recentCondensationMatch; // 이력이 있으면 배풍기 가동 권장
+        status.heater = heaterWeather; // 열풍기는 기상 기준 충족 시에만 표시
 
-        if (isCautionWeather) {
-            status.reason = `주의 구간(일교차 8℃↑ 또는 습도 70%↑) - 배풍기 가동 권장`;
-        } else {
-            status.reason = '최근 결로 발생에 따른 잔여 습기 예방 관리 기간';
-        }
+        if (recentCondensationMatch) status.reason = '최근 발생 이력에 따른 주의';
+        else if (isCautionWeather) status.reason = `주의 구간(일교차 8℃↑ 또는 습도 70%↑)`;
+        else status.reason = `과거 유사 조건 이력(${historyMatchCount}건) 주의`;
     }
     // 강수 예보 및 영하권 예외 처리
     else if (maxRainProb >= 60 || minTemp <= -3) {
         status.risk = '주의';
         status.fan = true;
-        status.reason = maxRainProb >= 60 ? '강수 예보에 따른 고습도 주의' : '영하권 기온 하강에 따른 선제적 관리';
+        status.heater = heaterWeather;
+        status.reason = maxRainProb >= 60 ? '강수 예보 주의' : '영하권 기온 하강 주의';
     }
 
     return status;

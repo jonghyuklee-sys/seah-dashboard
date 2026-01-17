@@ -133,6 +133,7 @@ body {
     background-color: #f4f7f9;
     color: var(--seah-gray);
     line-height: 1.6;
+    word-break: keep-all;
     -webkit-font-smoothing: antialiased;
     zoom: 0.9;
     /* 전체 화면 크기를 90%로 축소 */
@@ -323,9 +324,10 @@ h3 {
 }
 
 .status-value {
-    font-size: 3rem;
+    font-size: clamp(1.8rem, 5vw, 3rem);
     font-weight: 800;
     margin: var(--spacing-sm) 0;
+    white-space: nowrap;
 }
 
 /* Weather & Input */
@@ -1162,15 +1164,62 @@ h3 {
     font-size: 0.8rem;
 }
 
-@media (max-width: 768px) {
-    .status-card {
+@media (max-width: 1400px) {
+    .dashboard-grid {
+        grid-template-columns: 280px 1fr;
+    }
+
+    .side-right {
+        grid-column: span 2;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+    }
+}
+
+@media (max-width: 1024px) {
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .side-left,
+    .main-content,
+    .side-right {
         grid-column: span 1;
     }
 
+    .side-right {
+        grid-template-columns: 1fr;
+    }
+
+    .grid-2-col {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 768px) {
     .main-header {
         flex-direction: column;
         text-align: center;
+        gap: 15px;
+    }
+
+    .header-left {
+        flex-direction: column;
         gap: 10px;
+    }
+
+    .header-v-divider {
+        display: none;
+    }
+
+    .header-nav {
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    .status-list {
+        grid-template-columns: 1fr;
     }
 }
 
