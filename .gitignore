@@ -1,0 +1,26 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDEs
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Private/Envs
+.env
+.env.local
+
+# Web
+node_modules/
+.next/
+out/
+build/
+dist/
+.vercel
