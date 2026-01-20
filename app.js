@@ -2098,7 +2098,12 @@ function openPastRecordModal(editId = null) {
                 }
             }
         } else {
-            log = monitoringLogs.find(l => (l.timestamp && l.timestamp.toString() === editId) || (new Date(l.time).getTime().toString() === editId));
+            // fbKey, timestamp, time 등 다양한 조건으로 검색
+            log = monitoringLogs.find(l =>
+                (l.fbKey === editId) ||
+                (l.timestamp && l.timestamp.toString() === editId) ||
+                (new Date(l.time).getTime().toString() === editId)
+            );
         }
 
         if (log) {
@@ -2147,25 +2152,34 @@ function savePastRecord() {
     const humid = parseFloat(document.getElementById('past-humid').value);
 
     if (!dateStr || isNaN(outdoor) || isNaN(steel) || isNaN(indoor) || isNaN(humid)) {
-        alert('모든 입력 항목을 정확히 작성해주세요. (외기습도는 비워둘 수 있습니다만 권장됩니다)');
-        // 외기습도는 필수 아님 처리 가능하지만 일단 alert
+        alert('모든 입력 항목을 정확히 작성해주세요.');
+        return;
     }
 
-    const b = 17.62; const c = 243.12;
-    const gamma = (b * indoor) / (c + indoor) + Math.log(humid / 100.0);
-    const dp = (c * gamma) / (b - gamma);
-    const dpFixed = dp.toFixed(1);
+    const dpFixed = calculateDewPoint(indoor, humid);
+    const dp = parseFloat(dpFixed);
 
     let risk = { label: '안전', class: 'status-safe' };
     let reason = '정상 범위';
 
-    if (steel <= dp + 2) {
+    const tempDiff = parseFloat((steel - dp).toFixed(1));
+
+    if (tempDiff <= 2.0) {
         risk = { label: '위험', class: 'status-danger' };
         reason = '결로 발생 위험 (강판온도 ≤ 이슬점+2℃)';
-    } else if (steel <= dp + 5) {
+    } else if (tempDiff <= 5.0) {
         risk = { label: '주의', class: 'status-caution' };
         reason = '결로 주의 (강판온도 근접)';
     }
+
+    // 수정 대상 찾기
+    const index = editId && !editId.startsWith('snap-') ? monitoringLogs.findIndex(l =>
+        (l.fbKey === editId) ||
+        (l.timestamp && l.timestamp.toString() === editId) ||
+        (new Date(l.time).getTime().toString() === editId)
+    ) : -1;
+
+    const originalTimestamp = index !== -1 ? (monitoringLogs[index].timestamp || Date.now()) : Date.now();
 
     const newLog = {
         time: dateStr.replace('T', ' ') + ':00',
@@ -2177,12 +2191,12 @@ function savePastRecord() {
         outdoorHum: isNaN(outdoorHum) ? 0 : outdoorHum,
         steel: steel,
         dp: dpFixed,
-        tempDiff: (steel - dp).toFixed(1),
+        tempDiff: tempDiff,
         risk: risk.label,
         riskClass: risk.class,
         riskReason: reason,
         source: 'manual_history',
-        timestamp: editId ? parseInt(editId) : Date.now()
+        timestamp: editId && !editId.startsWith('snap-') ? originalTimestamp : Date.now()
     };
 
     if (editId) {
@@ -2223,22 +2237,16 @@ function savePastRecord() {
                 }
             }
         } else {
-            const index = monitoringLogs.findIndex(l => l.timestamp && l.timestamp.toString() === editId);
             let fbKey = null;
             if (index !== -1) {
                 fbKey = monitoringLogs[index].fbKey;
                 monitoringLogs[index] = newLog;
-            } else {
-                const timeIndex = monitoringLogs.findIndex(l => new Date(l.time).getTime().toString() === editId);
-                if (timeIndex !== -1) {
-                    fbKey = monitoringLogs[timeIndex].fbKey;
-                    monitoringLogs[timeIndex] = newLog;
-                }
             }
 
             if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
-                if (fbKey) {
-                    firebase.database().ref(`logs/${fbKey}`).set(newLog);
+                if (fbKey || (editId && !editId.startsWith('snap-'))) {
+                    const keyToUse = fbKey || editId;
+                    firebase.database().ref(`logs/${keyToUse}`).set(newLog);
                 } else {
                     firebase.database().ref('logs').push(newLog);
                 }
@@ -2291,20 +2299,31 @@ function deletePastRecord(id) {
             }
         }
     } else {
-        const index = monitoringLogs.findIndex(l => (l.timestamp && l.timestamp.toString() === id) || (new Date(l.time).getTime().toString() === id));
+        const index = monitoringLogs.findIndex(l =>
+            (l.fbKey === id) ||
+            (l.timestamp && l.timestamp.toString() === id) ||
+            (new Date(l.time).getTime().toString() === id)
+        );
         let fbKey = null;
         if (index !== -1) {
             fbKey = monitoringLogs[index].fbKey;
             monitoringLogs.splice(index, 1);
         }
 
-        if (typeof firebase !== 'undefined' && firebase.apps.length > 0 && fbKey) {
-            firebase.database().ref(`logs/${fbKey}`).remove()
-                .then(() => {
-                    alert('기록이 삭제되었습니다.');
-                    updateCondensationHistory();
-                });
-            return;
+        if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+            const keyToRemove = fbKey || id;
+            if (keyToRemove && (fbKey || !id.startsWith('snap-'))) {
+                firebase.database().ref(`logs/${keyToRemove}`).remove()
+                    .then(() => {
+                        alert('기록이 삭제되었습니다.');
+                        updateCondensationHistory();
+                    })
+                    .catch(err => {
+                        console.error('Delete failed:', err);
+                        alert('삭제에 실패했습니다.');
+                    });
+                return;
+            }
         }
         localStorage.setItem('seah_logs', JSON.stringify(monitoringLogs));
     }

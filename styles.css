@@ -2892,3 +2892,453 @@ body.is-admin .header-inputs.admin-only {
         grid-template-columns: repeat(2, 1fr);
     }
 }
+
+/* ========== 모바일 최적화 강화 (주간 예측처럼 정돈된 레이아웃) ========== */
+
+/* 태블릿 및 모바일 공통 */
+@media (max-width: 768px) {
+
+    /* ===== 대시보드 그리드 개선 ===== */
+    .dashboard-grid {
+        grid-template-areas:
+            "risk"
+            "weather"
+            "report"
+            "main"
+            "history" !important;
+        grid-template-columns: 1fr !important;
+        gap: 12px !important;
+    }
+
+    /* 모든 카드가 전체 너비 사용 */
+    .status-card,
+    .weather-card,
+    .report-status-card,
+    .location-summary-card,
+    .history-card {
+        grid-column: span 1 !important;
+        width: 100% !important;
+        min-width: unset !important;
+    }
+
+    /* ===== 위험도 카드 모바일 최적화 ===== */
+    .status-card {
+        padding: 15px !important;
+        min-height: auto !important;
+    }
+
+    .status-card>div[style*="display: flex"] {
+        flex-direction: column !important;
+        gap: 15px !important;
+    }
+
+    .status-card .status-value {
+        font-size: 2rem !important;
+    }
+
+    .status-card .metrics-row {
+        flex-direction: row !important;
+        justify-content: center !important;
+        gap: 20px !important;
+    }
+
+    /* 구분선 숨기기 */
+    .status-card div[style*="width: 1px"],
+    .weather-card div[style*="width: 1px"] {
+        display: none !important;
+    }
+
+    /* ===== 날씨 카드 모바일 최적화 ===== */
+    .weather-card {
+        padding: 15px !important;
+        min-height: auto !important;
+    }
+
+    .weather-horizontal-wrap {
+        flex-direction: column !important;
+        gap: 15px !important;
+    }
+
+    .weather-horizontal-wrap>div[style*="display: flex"] {
+        flex-direction: column !important;
+        gap: 10px !important;
+    }
+
+    .weather-value {
+        font-size: 2.2rem !important;
+    }
+
+    .weather-forecast-grid {
+        width: 100% !important;
+        grid-template-columns: 1fr 1fr !important;
+        padding: 10px 0 !important;
+        border-top: 1px dashed #ddd;
+        margin-top: 10px;
+    }
+
+    /* ===== 정기 점검 현황 카드 ===== */
+    .report-status-card {
+        padding: 15px !important;
+    }
+
+    .report-status-header {
+        flex-direction: column !important;
+        gap: 10px !important;
+        text-align: center;
+    }
+
+    .report-slots {
+        flex-direction: column !important;
+        gap: 10px !important;
+    }
+
+    .report-slot {
+        padding: 12px !important;
+    }
+
+    /* ===== 위치별 최신 현황 카드 ===== */
+    .location-summary-card {
+        padding: 12px !important;
+    }
+
+    .location-summary-header {
+        flex-direction: column !important;
+        gap: 10px !important;
+        text-align: center;
+    }
+
+    .location-summary-header .header-title h3 {
+        font-size: 1rem !important;
+    }
+
+    .header-inputs.admin-only {
+        width: 100%;
+    }
+
+    .input-row-mini {
+        flex-wrap: wrap !important;
+        justify-content: center !important;
+        gap: 8px !important;
+    }
+
+    /* 위치 카드 그리드 */
+    .status-list {
+        grid-template-columns: 1fr !important;
+        gap: 10px !important;
+    }
+
+    .status-item {
+        padding: 12px !important;
+        flex-direction: column !important;
+        gap: 10px !important;
+    }
+
+    .loc-card-top {
+        width: 100% !important;
+    }
+
+    .loc-header-info {
+        padding-bottom: 10px !important;
+    }
+
+    .loc-title-row {
+        justify-content: space-between !important;
+    }
+
+    .loc-name {
+        font-size: 0.9rem !important;
+    }
+
+    .loc-data-grid {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 6px 15px !important;
+    }
+
+    .data-group {
+        font-size: 0.8rem !important;
+    }
+
+    .loc-status-badges {
+        width: 100%;
+    }
+
+    .badge-row,
+    .badge-row-sub {
+        justify-content: space-between !important;
+    }
+
+    .badge {
+        flex: 1 !important;
+        min-width: unset !important;
+        font-size: 0.7rem !important;
+        padding: 5px 6px !important;
+    }
+
+    /* ===== 점검 기록 히스토리(캘린더) 카드 ===== */
+    .history-card {
+        padding: 12px !important;
+    }
+
+    .card-header-column h3 {
+        font-size: 1rem !important;
+        text-align: center;
+    }
+
+    .card-header-column p {
+        text-align: center;
+    }
+
+    .calendar-nav {
+        justify-content: center !important;
+    }
+
+    .calendar-day {
+        height: 60px !important;
+        padding: 3px !important;
+    }
+
+    .day-number {
+        font-size: 0.65rem !important;
+    }
+
+    .mini-badge {
+        font-size: 0.5rem !important;
+        padding: 1px 2px !important;
+    }
+
+    /* ===== 모니터링 로그 테이블 ===== */
+    .log-section .card {
+        padding: 12px !important;
+    }
+
+    .log-header {
+        flex-direction: column !important;
+        gap: 10px !important;
+        text-align: center;
+    }
+
+    .log-header h3 {
+        font-size: 1rem !important;
+    }
+
+    .header-btns {
+        justify-content: center !important;
+    }
+}
+
+/* ===== 결로 이력 뷰 모바일 최적화 ===== */
+@media (max-width: 768px) {
+
+    #history-view .card.full-width {
+        padding: 15px !important;
+    }
+
+    #history-view .forecast-header {
+        padding: 0 !important;
+    }
+
+    #history-view .forecast-header>div {
+        width: 100%;
+    }
+
+    #history-view .forecast-header>div>div[style*="display: flex"] {
+        flex-direction: column !important;
+        gap: 10px !important;
+    }
+
+    #history-view h2 {
+        font-size: 1.1rem !important;
+        text-align: center;
+    }
+
+    #history-view .text-muted {
+        text-align: center;
+        font-size: 0.8rem !important;
+    }
+
+    /* 과거 이력 등록 버튼 */
+    #history-view .btn-nav.admin-only {
+        width: 100%;
+        text-align: center;
+        padding: 10px !important;
+    }
+
+    /* ===== 분석 통계 카드 모바일 ===== */
+    .analysis-stats-container {
+        grid-template-columns: 1fr 1fr !important;
+        gap: 10px !important;
+        margin: 15px 0 !important;
+    }
+
+    .stat-card {
+        padding: 15px 10px !important;
+        min-height: 120px !important;
+        gap: 8px !important;
+    }
+
+    .stat-label {
+        font-size: 0.75rem !important;
+        line-height: 1.3 !important;
+    }
+
+    .stat-value-mini {
+        font-size: 1.5rem !important;
+    }
+
+    .stat-sub-label {
+        font-size: 0.65rem !important;
+        line-height: 1.3 !important;
+    }
+
+    /* ===== 결로 이력 테이블 모바일 ===== */
+    #history-view .table-container {
+        margin-bottom: 15px !important;
+        border-radius: 8px !important;
+    }
+
+    .report-table {
+        font-size: 0.75rem !important;
+        min-width: 800px !important;
+    }
+
+    .report-table th,
+    .report-table td {
+        padding: 8px 5px !important;
+        font-size: 0.72rem !important;
+    }
+
+    .report-table th {
+        font-size: 0.7rem !important;
+        white-space: nowrap;
+    }
+
+    /* 페이지네이션 모바일 */
+    .pagination-container {
+        flex-wrap: wrap !important;
+        gap: 5px !important;
+        margin-top: 15px !important;
+    }
+
+    .btn-pagination {
+        padding: 5px 10px !important;
+        font-size: 0.8rem !important;
+    }
+
+    #history-message {
+        font-size: 0.85rem !important;
+    }
+}
+
+/* ===== 매우 작은 화면 (480px 이하) ===== */
+@media (max-width: 480px) {
+
+    .container {
+        padding: 8px 10px !important;
+    }
+
+    /* 헤더 추가 최적화 */
+    .brand-logo {
+        height: 40px !important;
+    }
+
+    .header-left h1 {
+        font-size: 1rem !important;
+    }
+
+    .header-nav {
+        gap: 5px !important;
+    }
+
+    .btn-nav {
+        padding: 6px 10px !important;
+        font-size: 0.75rem !important;
+    }
+
+    #current-time {
+        font-size: 0.8rem !important;
+    }
+
+    /* 카드 제목들 */
+    h3 {
+        font-size: 1rem !important;
+    }
+
+    /* 위험도 카드 */
+    .status-card .status-value {
+        font-size: 1.6rem !important;
+    }
+
+    .status-card .metric-box span,
+    .status-card .metric-box strong {
+        font-size: 0.8rem !important;
+    }
+
+    /* 날씨 카드 */
+    .weather-value {
+        font-size: 1.8rem !important;
+    }
+
+    .weather-sub-value {
+        font-size: 1rem !important;
+    }
+
+    /* 분석 통계 카드 - 1열 레이아웃 */
+    .analysis-stats-container {
+        grid-template-columns: 1fr !important;
+    }
+
+    .stat-card {
+        padding: 12px !important;
+        min-height: 100px !important;
+        flex-direction: row !important;
+        justify-content: space-between !important;
+        align-items: center !important;
+        text-align: left !important;
+    }
+
+    .stat-card>.stat-label {
+        flex: 1;
+    }
+
+    .stat-value-mini {
+        font-size: 1.3rem !important;
+    }
+
+    .stat-sub-label {
+        display: none !important;
+    }
+
+    /* 위치 카드 데이터 */
+    .loc-data-grid {
+        grid-template-columns: 1fr 1fr !important;
+    }
+
+    .data-group {
+        font-size: 0.75rem !important;
+    }
+
+    .data-group .label {
+        min-width: 25px !important;
+    }
+
+    /* 캘린더 */
+    .calendar-day {
+        height: 50px !important;
+    }
+
+    .calendar-day-header {
+        font-size: 0.6rem !important;
+        padding: 4px 0 !important;
+    }
+
+    /* 버튼들 */
+    .btn-mini {
+        padding: 4px 8px !important;
+        font-size: 0.7rem !important;
+    }
+
+    /* 테이블 스크롤 안내 */
+    .table-container::after {
+        font-size: 0.65rem !important;
+    }
+}
