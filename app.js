@@ -1253,6 +1253,43 @@ function updateCondensationAnalysis(data) {
     if (avgDiffEl) avgDiffEl.textContent = diffCount > 0 ? `${(diffSum / diffCount).toFixed(1)} °C` : '- °C';
 }
 
+/**
+ * 알고리즘에서 사용할 수 있도록 결로 이력 데이터를 간단한 배열 형태로 반환합니다.
+ */
+function getCondensationHistoryForAlgorithm() {
+    const historyData = [];
+    if (monitoringLogs) {
+        monitoringLogs.forEach(log => {
+            if (log && log.source === 'manual_history') {
+                historyData.push({
+                    outTemp: log.outdoorTemp,
+                    outHumid: log.outdoorHum
+                });
+            }
+        });
+    }
+    if (allReports) {
+        Object.keys(allReports).forEach(date => {
+            const day = allReports[date];
+            if (day && typeof day === 'object') {
+                Object.keys(day).forEach(slot => {
+                    const r = day[slot];
+                    if (r && r.snapshot) {
+                        const hasCondensation = Object.values(r.snapshot).some(s => s.product === '결로 인지');
+                        if (hasCondensation && r.outdoor) {
+                            historyData.push({
+                                outTemp: typeof r.outdoor === 'object' ? r.outdoor.temp : parseFloat(r.outdoor),
+                                outHumid: typeof r.outdoor === 'object' ? r.outdoor.humidity : (r.outdoor.includes('/') ? parseFloat(r.outdoor.split('/')[1]) : 0)
+                            });
+                        }
+                    }
+                });
+            }
+        });
+    }
+    return historyData;
+}
+
 function formatSnapshotTime(time, slot) {
     if (!time || time === '-') return slot;
     return time;
@@ -1744,7 +1781,10 @@ async function fetchIntegratedWeeklyForecast(shortApiKey, midApiKey) {
         const pmPop = day.pops.length > 0 ? (day.pops.length > 12 ? Math.max(...day.pops.slice(12, 18)) : Math.max(...day.pops)) : 0;
         // 기온 추이 분석을 위해 이전 날짜의 최저기온 전달
         const prevMin = result.length > 0 ? result[result.length - 1].minTemp : min;
-        const op = determineFanHeaterOperationV2(min, max, amPop, pmPop, avgHum, prevMin);
+
+        // 빅데이터 연동을 위한 전역 데이터 가공
+        const historyData = getCondensationHistoryForAlgorithm();
+        const op = determineFanHeaterOperationV2(min, max, amPop, pmPop, avgHum, prevMin, historyData);
 
         result.push({
             date: day.date,
@@ -1961,6 +2001,7 @@ function displayWeeklyForecast(forecast) {
                     <button class="equipment-btn ${day.heater ? 'active active-heater' : ''}" title="${day.reason}" disabled>열풍기</button>
                 </div>
                 <div class="forecast-risk ${riskClass}">${day.risk}</div>
+                <div class="forecast-reason">${day.reason || ''}</div>
             </div>
         `;
     }).join('');
@@ -2277,14 +2318,13 @@ function updateCurrentTime() {
     // 이미 별도의 setInterval에서 처리 중이므로 비워둠
 }
 
-// 고도화된 결로 예측 알고리즘 (Sudden Warming & Cold Mass 분석 적용)
-function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb, humidity, prevMinTemp) {
+// 고도화된 결로 예측 알고리즘 (빅데이터 분석 및 Sudden Warming 반영)
+function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb, humidity, prevMinTemp, historyData = []) {
     const maxRainProb = Math.max(amRainProb, pmRainProb);
     const currentTempDiff = Number((maxTemp - minTemp).toFixed(1));
     const currentAvgHum = Number(humidity || 60);
 
     // [핵심 로직] 기온 상승폭 분석 (전일 최저 vs 당일 최고)
-    // 강판은 전날의 최저 기온에 수렴해 있으므로, 공기와의 온도차는 이 값을 기준으로 발생함
     const referenceMin = prevMinTemp !== undefined ? prevMinTemp : minTemp;
     const tempJump = Number((maxTemp - referenceMin).toFixed(1));
 
@@ -2295,19 +2335,32 @@ function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb,
         reason: '정상 범위'
     };
 
+    // [빅데이터 매칭] 과거 발생 이력과 현재 예보 데이터 비교
+    let historyMatch = null;
+    if (historyData && historyData.length > 0) {
+        // 현재 최고 기온(공기 온도)과 습도가 과거 발생 당시와 유사한지 체크
+        historyMatch = historyData.find(h => {
+            const hTemp = parseFloat(h.outTemp);
+            const hHum = parseFloat(h.outHumid);
+            return !isNaN(hTemp) && !isNaN(hHum) &&
+                Math.abs(hTemp - maxTemp) <= 1.5 && // 온도 오차 1.5도 이내
+                Math.abs(hHum - currentAvgHum) <= 7;   // 습도 오차 7% 이내
+        });
+    }
+
     // 1. 위험 (Danger) 판정 기준
     const isSuddenWarmingDanger = (tempJump >= 10 && currentAvgHum >= 65);
     const isExtremeDiff = (currentTempDiff >= 12);
     const isExtremeHumid = (currentAvgHum >= 85 && maxTemp > 0);
-
     const isDeepFreeze = (maxTemp <= 3);
 
-    if ((isSuddenWarmingDanger || isExtremeDiff || isExtremeHumid) && !isDeepFreeze) {
+    if ((isSuddenWarmingDanger || isExtremeDiff || isExtremeHumid || historyMatch) && !isDeepFreeze) {
         status.risk = '위험';
         status.heater = true;
         status.fan = true;
 
-        if (isSuddenWarmingDanger) status.reason = `급격한 기온 상승(${tempJump}℃↑) 위험`;
+        if (historyMatch) status.reason = `과거 유사 사례(${historyMatch.outTemp}℃/${historyMatch.outHumid}%) 기반 위험 감지`;
+        else if (isSuddenWarmingDanger) status.reason = `급격한 기온 상승(${tempJump}℃↑) 위험`;
         else if (isExtremeDiff) status.reason = `극심한 일교차(${currentTempDiff}℃↑) 위험`;
         else status.reason = `초고습(${currentAvgHum}%↑) 환경 위험`;
     }
@@ -2316,7 +2369,6 @@ function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb,
         status.risk = '주의';
         status.fan = true;
 
-        // 열풍기 가동 조건: 기온상승 10도 이상 OR 습도 80% 이상 OR (기온상승 8도 이상 AND 습도 70% 이상)
         const isHeaterNeed = (tempJump >= 10 || currentAvgHum >= 80 || (tempJump >= 8 && currentAvgHum >= 70));
         status.heater = isHeaterNeed;
 

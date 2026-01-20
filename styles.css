@@ -1400,6 +1400,31 @@ body.is-admin .header-inputs.admin-only {
     /* 최소 높이 확보 */
 }
 
+/* 주간 예보 사유 스타일 */
+.forecast-reason {
+    font-size: 0.7rem;
+    color: #888;
+    margin-top: 8px;
+    line-height: 1.3;
+    min-height: 2.6em;
+    /* 두 줄 분량 공간 확보 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    word-break: keep-all;
+}
+
+.status-caution+.forecast-reason {
+    color: #a68102;
+    /* 주의 단계일 때 텍스트 색상 변경 */
+}
+
+.status-danger+.forecast-reason {
+    color: #c92a2a;
+    /* 위험 단계일 때 텍스트 색상 변경 */
+}
+
 .stat-card.stat-blue {
     border-top-color: var(--seah-blue);
 }
