@@ -8,10 +8,10 @@ const CONFIG = {
 };
 
 const WAREHOUSE_LOCATIONS = [
-    "CGL 제품창고", "SSCL 제품창고",
     "1CCL 원자재동", "1CCL 제품창고",
     "2CCL 원자재동", "2CCL 제품창고",
-    "3CCL 원자재동", "3CCL 제품창고"
+    "3CCL 원자재동", "3CCL 제품창고",
+    "CGL 제품창고", "SSCL 제품창고"
 ];
 
 // ========== 2. 전역 상태 ==========
@@ -29,12 +29,12 @@ let kmaMidApiKey = ""; // 중기예보 API 키
 
 // ========== 3. DOM 요소 참조 ==========
 const elements = {
-    locationSelect: document.getElementById('location-select'),
-    steelTempInput: document.getElementById('steel-temp-input'),
-    tempInput: document.getElementById('temp-input'),
-    humidityInput: document.getElementById('humidity-input'),
-    outdoorHumidityInput: document.getElementById('outdoor-humidity-input'),
-    calculateBtn: document.getElementById('calculate-btn'),
+    // locationSelect: document.getElementById('location-select'), // Removed
+    // steelTempInput: document.getElementById('steel-temp-input'), // Removed
+    // tempInput: document.getElementById('temp-input'), // Removed
+    // humidityInput: document.getElementById('humidity-input'), // Removed
+    // outdoorHumidityInput: document.getElementById('outdoor-humidity-input'), // Removed
+    // calculateBtn: document.getElementById('calculate-btn'), // Removed
     statusText: document.getElementById('status-text'),
     dewPointVal: document.getElementById('dew-point-val'),
     tempDiffVal: document.getElementById('temp-diff-val'),
@@ -152,22 +152,43 @@ function renderLocationSummary() {
 
         return `
             <div class="status-item">
-                <div class="loc-main-content">
-                    <div class="loc-header">
-                        <span class="loc-name">${loc}</span>
-                        <span class="loc-data">
-                            소재:${data.steel}°C / 이슬점:${data.dp}°C / 내온:${data.temp || '-'}°C / 내습:${data.humidity || '-'}% 
-                            <small>(${data.time})</small>
-                        </span>
+                <div class="loc-card-top">
+                    <div class="loc-header-info">
+                        <div class="loc-title-row">
+                            <span class="loc-name">${loc}</span>
+                            <div class="loc-risk ${riskBgClass}">${data.riskLabel}</div>
+                        </div>
+                        <div class="loc-data-grid">
+                            <div class="data-group"><span class="label">소재:</span><strong>${data.steel}°C</strong></div>
+                            <div class="data-group"><span class="label">이슬:</span><strong>${data.dp}°C</strong></div>
+                            <div class="data-group"><span class="label">내온:</span><strong>${data.temp || '-'}°C</strong></div>
+                            <div class="data-group"><span class="label">내습:</span><strong>${data.humidity || '-'}%</strong></div>
+                        </div>
+                        <div class="loc-time-badge">🕒 ${data.time}</div>
                     </div>
-                    <div class="status-badges">
-                        <button class="badge badge-gate ${gateClass}" data-location="${loc}" data-field="gate" ${toggleDisabled}>GATE: ${data.gate}${arrow}</button>
-                        <button class="badge badge-pack ${packClass}" data-location="${loc}" data-field="pack" ${toggleDisabled}>${data.pack}${arrow}</button>
+                    <div class="loc-status-badges">
+                        <div class="badge-row">
+                            <button class="badge badge-product ${prodClass}" data-location="${loc}" data-field="product" ${toggleDisabled}>${data.product}${arrow}</button>
+                        </div>
+                        <div class="badge-row-sub">
+                            <button class="badge badge-gate ${gateClass}" data-location="${loc}" data-field="gate" ${toggleDisabled}>GATE:${data.gate}${arrow}</button>
+                            <button class="badge badge-pack ${packClass}" data-location="${loc}" data-field="pack" ${toggleDisabled}>${data.pack}${arrow}</button>
+                        </div>
                     </div>
                 </div>
-                <div class="loc-status-aside">
-                    <button class="badge badge-product ${prodClass}" data-location="${loc}" data-field="product" ${toggleDisabled}>${data.product}${arrow}</button>
-                    <div class="loc-risk ${riskBgClass}">${data.riskLabel}</div>
+                
+                <!-- 관리자용 직접 입력란 -->
+                <div class="admin-only loc-input-row">
+                    <div class="loc-input-group">
+                        <input type="number" step="0.1" class="loc-mini-input" id="input-steel-${loc}" placeholder="소재온도 입력">
+                    </div>
+                    <div class="loc-input-group">
+                        <input type="number" step="0.1" class="loc-mini-input" id="input-temp-${loc}" placeholder="내부온도 입력">
+                    </div>
+                    <div class="loc-input-group">
+                        <input type="number" step="1" class="loc-mini-input" id="input-hum-${loc}" placeholder="내부습도 입력">
+                    </div>
+                    <button class="btn-loc-analyze" onclick="analyzeLocation('${loc}')">저장</button>
                 </div>
             </div>
         `;
@@ -175,6 +196,47 @@ function renderLocationSummary() {
 
     elements.locationStatusList.innerHTML = html;
     console.log('=== renderLocationSummary 완료 - ' + WAREHOUSE_LOCATIONS.length + '개 위치 렌더링됨 ===');
+}
+
+// ========== 5.5 개별 위치 분석 및 저장 ==========
+async function analyzeLocation(loc) {
+    const steelInput = document.getElementById(`input-steel-${loc}`);
+    const tempInput = document.getElementById(`input-temp-${loc}`);
+    const humInput = document.getElementById(`input-hum-${loc}`);
+
+    const st = parseFloat(steelInput.value);
+    const it = parseFloat(tempInput.value);
+    const h = parseFloat(humInput.value);
+
+    if (isNaN(st) || isNaN(it) || isNaN(h)) {
+        alert('모든 환경 데이터를 정확히 입력해주세요.');
+        return;
+    }
+
+    // 중복 데이터 입력 확인
+    if (latestLocationStatus[loc] && latestLocationStatus[loc].dateStr === getLocalDateString()) {
+        const lastTime = latestLocationStatus[loc].time;
+        if (!confirm(`'${loc}'의 데이터가 이미 입력되어 있습니다 (${lastTime}).\n새로운 값으로 수정하시겠습니까?`)) {
+            return;
+        }
+    }
+
+    // 실외 온도/습도: 자동값 사용
+    let outdoorTemp = parseFloat(document.getElementById('outdoor-temp-input').value);
+    let outdoorHum = parseFloat(document.getElementById('outdoor-humidity-input').value);
+
+    if (isNaN(outdoorTemp) || isNaN(outdoorHum)) {
+        const weather = await updateWeatherData();
+        if (isNaN(outdoorTemp)) outdoorTemp = weather.temp;
+        if (isNaN(outdoorHum)) outdoorHum = weather.humidity;
+    }
+
+    updateUI(loc, st, it, h, outdoorTemp, outdoorHum);
+
+    // 입력창 초기화
+    steelInput.value = '';
+    tempInput.value = '';
+    humInput.value = '';
 }
 
 // ========== 6. 위치 상태 업데이트 ==========
@@ -306,8 +368,8 @@ function applyAdminUI() {
 
     // 입력 필드들 비활성화/활성화 제어
     const inputs = [
-        'location-select', 'steel-temp-input', 'temp-input',
-        'humidity-input', 'outdoor-temp-input', 'outdoor-humidity-input',
+        // 'location-select', 'steel-temp-input', 'temp-input', // Removed
+        // 'humidity-input', 'outdoor-temp-input', 'outdoor-humidity-input', // Removed
         'report-date', 'report-time',
         'status-inspection-date'
     ];
@@ -1150,40 +1212,8 @@ function determineFanHeaterOperation(minTemp, maxTemp, amRainProb, pmRainProb, h
 
 // ========== 14. 이벤트 리스너 ==========
 function setupEventListeners() {
-    // 계산하기 버튼
-    if (elements.calculateBtn) {
-        elements.calculateBtn.addEventListener('click', async () => {
-            const loc = elements.locationSelect.value;
-            const st = parseFloat(elements.steelTempInput.value);
-            const it = parseFloat(elements.tempInput.value);
-            const h = parseFloat(elements.humidityInput.value);
+    // 계산하기 버튼 - 개별 분석으로 이전됨
 
-            if (isNaN(st) || isNaN(it) || isNaN(h)) {
-                alert('모든 온도와 습도를 정확히 입력해주세요.');
-                return;
-            }
-
-            // 중복 데이터 입력 확인 (오늘 날짜로 이미 입력된 경우)
-            if (latestLocationStatus[loc] && latestLocationStatus[loc].dateStr === getLocalDateString()) {
-                const lastTime = latestLocationStatus[loc].time;
-                // 사용자 요청: 이미 입력되어 있으면 수정할 것인지 팝업
-                if (!confirm(`'${loc}'의 데이터가 이미 입력되어 있습니다 (${lastTime}).\n새로운 값으로 수정하시겠습니까?`)) {
-                    return;
-                }
-            }
-
-            // 실외 온도/습도: 사용자가 수정한 값 우선 사용, 없으면 API 업데이트
-            let outdoorTemp = parseFloat(document.getElementById('outdoor-temp-input').value);
-            let outdoorHum = parseFloat(document.getElementById('outdoor-humidity-input').value);
-
-            if (isNaN(outdoorTemp) || isNaN(outdoorHum)) {
-                const weather = await updateWeatherData();
-                if (isNaN(outdoorTemp)) outdoorTemp = weather.temp;
-                if (isNaN(outdoorHum)) outdoorHum = weather.humidity;
-            }
-            updateUI(loc, st, it, h, outdoorTemp, outdoorHum);
-        });
-    }
 
     // 로그 삭제 버튼
     if (elements.clearBtn) {

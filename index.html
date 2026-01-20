@@ -70,73 +70,11 @@
             </div>
         </div>
     </div>
-    </header>
+
 
     <div id="dashboard-view" class="view-content active">
         <section class="dashboard-grid">
-            <!-- 1단 (왼쪽): 입력 섹션 -->
-            <div class="column side-left">
-                <div class="card input-card">
-                    <h3>환경 데이터 입력</h3>
-                    <div class="input-grid">
-                        <div class="input-group">
-                            <label for="report-date">점검 일자</label>
-                            <input type="date" id="report-date">
-                        </div>
-                        <div class="input-group">
-                            <label for="report-time">점검 시간</label>
-                            <select id="report-time">
-                                <option value="07:00">07:00</option>
-                                <option value="15:00">15:00</option>
-                                <option value="실시간">실시간</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="input-group">
-                        <label for="location-select">모니터링 위치</label>
-                        <select id="location-select">
-                            <option value="CGL 제품창고">CGL 제품창고</option>
-                            <option value="1CCL 원자재동">1CCL 원자재동</option>
-                            <option value="1CCL 제품창고">1CCL 제품창고</option>
-                            <option value="2CCL 원자재동">2CCL 원자재동</option>
-                            <option value="2CCL 제품창고">2CCL 제품창고</option>
-                            <option value="3CCL 원자재동">3CCL 원자재동</option>
-                            <option value="3CCL 제품창고">3CCL 제품창고</option>
-                            <option value="SSCL 제품창고">SSCL 제품창고</option>
-                        </select>
-                    </div>
-                    <div class="input-group">
-                        <label for="outdoor-temp-input">실외 온도 (°C)</label>
-                        <input type="number" id="outdoor-temp-input" step="0.1" placeholder="자동">
-                    </div>
-                    <div class="input-group">
-                        <label for="outdoor-humidity-input">실외 습도 (%)</label>
-                        <input type="number" id="outdoor-humidity-input" step="1" placeholder="자동">
-                    </div>
-                    <div class="input-group">
-                        <label for="steel-temp-input">강판 온도 (°C)</label>
-                        <input type="number" id="steel-temp-input" step="0.1" placeholder="18.0">
-                    </div>
-                    <div class="input-group">
-                        <label for="temp-input">실내 온도 (°C)</label>
-                        <input type="number" id="temp-input" step="0.1" placeholder="20.5">
-                    </div>
-                    <div class="input-group" style="margin-bottom: 5px;">
-                        <label for="humidity-input">실내 습도 (%)</label>
-                        <input type="number" id="humidity-input" step="1" placeholder="65">
-                    </div>
-                    <button id="calculate-btn" class="btn-primary admin-only" style="margin-top: 10px;">실시간 결로
-                        분석하기</button>
-                    <div class="admin-hidden"
-                        style="text-align: center; color: #666; padding: 8px; background: #f8f9fa; border-radius: 8px; font-size: 0.82rem; margin-top: 5px;">
-                        💡 데이터 입력은 관리자만 가능합니다.
-                    </div>
-                </div>
-
-
-            </div>
-
-            <!-- 2단 (중앙): 현황 및 요약 -->
+            <!-- 1단 (중앙): 현황 및 요약 -->
             <div class="column main-content">
                 <div class="grid-2-col">
                     <div class="card status-card" id="risk-indicator">
@@ -212,15 +150,40 @@
                 </div>
 
                 <div class="card location-summary-card mt-md">
-                    <h3>위치별 최신 현황 <span id="location-sync-time"
-                            style="font-size: 0.85rem; font-weight: normal; color: #666; margin-left: 8px;"></span></h3>
+                    <div class="location-summary-header">
+                        <div class="header-title">
+                            <h3>위치별 최신 현황 <span id="location-sync-time"
+                                    style="font-size: 0.85rem; font-weight: normal; color: #666; margin-left: 8px;"></span>
+                            </h3>
+                        </div>
+                        <div class="header-inputs admin-only">
+                            <div class="input-row-mini">
+                                <input type="date" id="report-date" class="mini-input-field">
+                                <select id="report-time" class="mini-input-field">
+                                    <option value="07:00">07:00</option>
+                                    <option value="15:00">15:00</option>
+                                    <option value="실시간">실시간</option>
+                                </select>
+                                <div class="mini-input-wrap">
+                                    <span class="mini-label">외온:</span>
+                                    <input type="number" id="outdoor-temp-input" step="0.1"
+                                        class="mini-input-field weather-sync" style="width: 75px;">
+                                </div>
+                                <div class="mini-input-wrap">
+                                    <span class="mini-label">외습:</span>
+                                    <input type="number" id="outdoor-humidity-input" step="1"
+                                        class="mini-input-field weather-sync" style="width: 70px;">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     <div id="location-status-list" class="status-list">
                         <!-- JavaScript에서 렌더링됨 -->
                     </div>
                 </div>
             </div>
 
-            <!-- 3단 (오른족): 보고 및 지표 -->
+            <!-- 3단 (오른쪽): 보고 및 지표 -->
             <div class="column side-right">
                 <div class="card report-status-card">
                     <div class="report-status-header">
@@ -246,7 +209,6 @@
                         </div>
                     </div>
                 </div>
-
 
                 <div class="card history-card mt-md">
                     <div class="card-header-column">
