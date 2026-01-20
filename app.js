@@ -22,6 +22,8 @@ let lastResetDate = localStorage.getItem('seah_last_reset_date') || "";
 let currentCalendarDate = new Date();
 let isAdmin = sessionStorage.getItem('seah_is_admin') === 'true'; // 관리자 세션 유지
 let cachedForecast = null; // 전역 캐시 변수
+let historyCurrentPage = 1; // 결로 이력 현재 페이지
+const historyItemsPerPage = 10; // 결로 이력 페이지당 항목 수
 
 // 기상청 API 키 - Firebase에서만 관리 (보안 강화)
 let kmaShortApiKey = ""; // 단기예보 API 키
@@ -1070,13 +1072,13 @@ function updateCondensationHistory() {
         // (단순 위험 수치 도달 건은 관리자가 실제 발생여부를 확인한 것이 아니므로 제외)
         if (monitoringLogs && monitoringLogs.length > 0) {
             monitoringLogs.forEach(log => {
-                if (log.source === 'manual_history') {
+                if (log && typeof log === 'object' && log.source === 'manual_history') {
                     historyData.push({
-                        id: log.timestamp || new Date(log.time).getTime(),
+                        id: log.fbKey || log.timestamp || new Date(log.time).getTime(),
                         dateStr: log.time,
                         location: log.location,
                         outTemp: log.outdoorTemp !== undefined ? log.outdoorTemp : (log.outdoor ? parseFloat(log.outdoor) : '-'),
-                        outHumid: log.outdoorHum !== undefined ? log.outdoorHum : (log.outdoor && log.outdoor.includes('/') ? log.outdoor.split('/')[1].replace('%', '').trim() : '-'),
+                        outHumid: log.outdoorHum !== undefined ? log.outdoorHum : (log.outdoor && typeof log.outdoor === 'string' && log.outdoor.includes('/') ? log.outdoor.split('/')[1].replace('%', '').trim() : '-'),
                         inTemp: log.temp,
                         inHumid: log.humidity,
                         dewPoint: log.dp,
@@ -1091,45 +1093,58 @@ function updateCondensationHistory() {
         if (allReports) {
             Object.keys(allReports).forEach(date => {
                 const dayReport = allReports[date];
-                Object.keys(dayReport).forEach(slotKey => {
-                    const report = dayReport[slotKey];
-                    if (report && report.snapshot) {
-                        Object.keys(report.snapshot).forEach(loc => {
-                            const snap = report.snapshot[loc];
-                            if (snap.product === '결로 인지') {
-                                historyData.push({
-                                    id: `snap-${date}-${slotKey}-${loc}`,
-                                    dateStr: `${date} ${report.slot || '00:00'}`,
-                                    location: loc,
-                                    outTemp: (report.outdoor && typeof report.outdoor === 'object') ? report.outdoor.temp : (typeof report.outdoor === 'string' ? parseFloat(report.outdoor) : '-'),
-                                    outHumid: (report.outdoor && typeof report.outdoor === 'object') ? report.outdoor.humidity : (typeof report.outdoor === 'string' && report.outdoor.includes('/') ? report.outdoor.split('/')[1].replace('%', '').trim() : '-'),
-                                    inTemp: snap.temp || '-',
-                                    inHumid: snap.humidity || '-',
-                                    dewPoint: snap.dp || '-',
-                                    steelTemp: snap.steel || '-',
-                                    diff: snap.tempDiff || '-',
-                                    reason: '관리자 육안 식별(결로 인지)'
-                                });
-                            }
-                        });
-                    }
-                });
+                if (dayReport && typeof dayReport === 'object') {
+                    Object.keys(dayReport).forEach(slotKey => {
+                        const report = dayReport[slotKey];
+                        if (report && report.snapshot) {
+                            Object.keys(report.snapshot).forEach(loc => {
+                                const snap = report.snapshot[loc];
+                                if (snap && snap.product === '결로 인지') {
+                                    historyData.push({
+                                        id: `snap-${date}-${slotKey}-${loc}`,
+                                        dateStr: `${date} ${report.slot || '00:00'}`,
+                                        location: loc,
+                                        outTemp: (report.outdoor && typeof report.outdoor === 'object') ? report.outdoor.temp : (typeof report.outdoor === 'string' ? parseFloat(report.outdoor) : '-'),
+                                        outHumid: (report.outdoor && typeof report.outdoor === 'object') ? report.outdoor.humidity : (typeof report.outdoor === 'string' && report.outdoor.includes('/') ? report.outdoor.split('/')[1].replace('%', '').trim() : '-'),
+                                        inTemp: snap.temp || '-',
+                                        inHumid: snap.humidity || '-',
+                                        dewPoint: snap.dp || '-',
+                                        steelTemp: snap.steel || '-',
+                                        diff: snap.tempDiff || '-',
+                                        reason: '관리자 육안 식별(결로 인지)'
+                                    });
+                                }
+                            });
+                        }
+                    });
+                }
             });
         }
 
         // 날짜 내림차순 정렬
         historyData.sort((a, b) => {
-            const dateA = new Date(a.dateStr.replace(' ', 'T'));
-            const dateB = new Date(b.dateStr.replace(' ', 'T'));
-            return dateB - dateA;
+            const dateA = new Date((a.dateStr || '').replace(' ', 'T'));
+            const dateB = new Date((b.dateStr || '').replace(' ', 'T'));
+            return (dateB.getTime() || 0) - (dateA.getTime() || 0);
         });
 
         // 렌더링
         if (historyData.length === 0) {
             if (msg) msg.textContent = '저장된 결로 발생 이력이 없습니다.';
+            const paginationContainer = document.getElementById('history-pagination');
+            if (paginationContainer) paginationContainer.innerHTML = '';
         } else {
             if (msg) msg.style.display = 'none';
-            tbody.innerHTML = historyData.map(item => {
+
+            // 페이지네이션 처리
+            const totalPages = Math.ceil(historyData.length / historyItemsPerPage);
+            if (historyCurrentPage > totalPages) historyCurrentPage = totalPages;
+            if (historyCurrentPage < 1) historyCurrentPage = 1;
+
+            const startIndex = (historyCurrentPage - 1) * historyItemsPerPage;
+            const paginatedData = historyData.slice(startIndex, startIndex + historyItemsPerPage);
+
+            tbody.innerHTML = paginatedData.map(item => {
                 const isAdminUI = isAdmin ? `
                     <td class="admin-only">
                         <div class="action-btns">
@@ -1155,11 +1170,50 @@ function updateCondensationHistory() {
                     </tr>
                 `;
             }).join('');
+
+            renderHistoryPagination(totalPages);
         }
 
         // 상단 분석 카드 업데이트 호출
         updateCondensationAnalysis(historyData);
     }, 500);
+}
+
+/**
+ * 결로 이력 페이지네이션 컨트롤을 렌더링합니다.
+ */
+function renderHistoryPagination(totalPages) {
+    const container = document.getElementById('history-pagination');
+    if (!container) return;
+
+    if (totalPages <= 1) {
+        container.innerHTML = '';
+        return;
+    }
+
+    let html = '';
+    // 이전 페이지
+    html += `<button onclick="changeHistoryPage(${historyCurrentPage - 1})" ${historyCurrentPage === 1 ? 'disabled' : ''} class="btn-pagination">&lt;</button>`;
+
+    // 페이지 번호
+    for (let i = 1; i <= totalPages; i++) {
+        // 너무 많은 페이지가 생길 경우를 대비해 현재 페이지 주변만 표시하는 로직을 추가할 수 있지만, 
+        // 우선은 모든 페이지 번호를 표시합니다.
+        html += `<button onclick="changeHistoryPage(${i})" class="btn-pagination ${i === historyCurrentPage ? 'active' : ''}">${i}</button>`;
+    }
+
+    // 다음 페이지
+    html += `<button onclick="changeHistoryPage(${historyCurrentPage + 1})" ${historyCurrentPage === totalPages ? 'disabled' : ''} class="btn-pagination">&gt;</button>`;
+
+    container.innerHTML = html;
+}
+
+/**
+ * 결로 이력 페이지를 변경합니다.
+ */
+function changeHistoryPage(page) {
+    historyCurrentPage = page;
+    updateCondensationHistory();
 }
 
 /**
@@ -1307,11 +1361,17 @@ function init() {
     if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
         const db = firebase.database();
 
-        db.ref('logs').limitToLast(10).on('value', snapshot => {
+        db.ref('logs').on('value', snapshot => {
             const data = snapshot.val();
             if (data) {
-                monitoringLogs = Object.values(data).reverse();
+                monitoringLogs = Object.entries(data).map(([key, val]) => ({
+                    ...val,
+                    fbKey: key
+                })).reverse();
                 renderLogs();
+                if (document.getElementById('history-view').classList.contains('active')) {
+                    updateCondensationHistory();
+                }
             }
         });
 
@@ -2123,20 +2183,24 @@ function savePastRecord() {
             }
         } else {
             const index = monitoringLogs.findIndex(l => l.timestamp && l.timestamp.toString() === editId);
+            let fbKey = null;
             if (index !== -1) {
+                fbKey = monitoringLogs[index].fbKey;
                 monitoringLogs[index] = newLog;
             } else {
                 const timeIndex = monitoringLogs.findIndex(l => new Date(l.time).getTime().toString() === editId);
-                if (timeIndex !== -1) monitoringLogs[timeIndex] = newLog;
+                if (timeIndex !== -1) {
+                    fbKey = monitoringLogs[timeIndex].fbKey;
+                    monitoringLogs[timeIndex] = newLog;
+                }
             }
 
             if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
-                // 수동 로그의 경우, 수정 시 push로 새로 넣지 않고 (중복 방지) 
-                // 기존 entries 중 timestamp가 일치하는 것을 찾아 삭제 후 새로 넣거나
-                // 여기서는 일단 기존 로직대로 push 하되, 중복 이슈가 있다면 차후 UI에서 필터링하거나
-                // timestamp 기준으로 기존 값을 덮어쓸 수 있도록 보강이 필요함.
-                // 우선 외온/외습 저장을 위해 push에 newLog를 정확히 전달.
-                firebase.database().ref('logs').push(newLog);
+                if (fbKey) {
+                    firebase.database().ref(`logs/${fbKey}`).set(newLog);
+                } else {
+                    firebase.database().ref('logs').push(newLog);
+                }
             }
         }
     }
@@ -2186,12 +2250,22 @@ function deletePastRecord(id) {
             }
         }
     } else {
-        monitoringLogs = monitoringLogs.filter(l => (l.timestamp && l.timestamp.toString() !== id) && (new Date(l.time).getTime().toString() !== id));
-        localStorage.setItem('seah_logs', JSON.stringify(monitoringLogs));
+        const index = monitoringLogs.findIndex(l => (l.timestamp && l.timestamp.toString() === id) || (new Date(l.time).getTime().toString() === id));
+        let fbKey = null;
+        if (index !== -1) {
+            fbKey = monitoringLogs[index].fbKey;
+            monitoringLogs.splice(index, 1);
+        }
 
-        // Firebase의 경우 전체를 다시 쓰기는 위험하므로, 개별 삭제 로직이 필요하지만 
-        // 현 구조상 monitoringLogs가 실시간 동기화되므로 로컬 필터링만으로도 효과가 있을 수 있음
-        // (단, push된 데이터는 Firebase에서 직접 삭제해야 함)
+        if (typeof firebase !== 'undefined' && firebase.apps.length > 0 && fbKey) {
+            firebase.database().ref(`logs/${fbKey}`).remove()
+                .then(() => {
+                    alert('기록이 삭제되었습니다.');
+                    updateCondensationHistory();
+                });
+            return;
+        }
+        localStorage.setItem('seah_logs', JSON.stringify(monitoringLogs));
     }
 
     alert('기록이 삭제되었습니다.');

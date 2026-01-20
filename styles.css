@@ -139,15 +139,17 @@ body {
     line-height: 1.6;
     word-break: keep-all;
     -webkit-font-smoothing: antialiased;
-    zoom: 0.9;
-    /* 전체 화면 크기를 90%로 축소 */
+    /* zoom 제거하여 브라우저 표준 반응형 대응 */
 }
 
 .container {
-    width: 95%;
-    max-width: 1300px;
+    width: 100%;
+    /* 전체 너비 사용 */
+    max-width: none;
+    /* 너비 제한 해제 */
     margin: 0 auto;
-    padding: 20px 0;
+    padding: 3vh 20px;
+    /* 좌우 여백을 최소화하여 분홍색 라인에 맞춤 */
 }
 
 h1,
@@ -170,8 +172,9 @@ h3 {
     margin-top: var(--spacing-md);
 }
 
-.mt-lg {
-    margin-top: var(--spacing-lg);
+.mb-md {
+    margin-bottom: 12px !important;
+    /* 카드 사이 간격 12px */
 }
 
 /* Dashboard Layout */
@@ -265,12 +268,93 @@ h3 {
     white-space: nowrap;
 }
 
+/* 대시보드 그리드 - 사용자(기본) 모드 */
 .dashboard-grid {
     display: grid;
-    grid-template-columns: 1fr 340px;
-    gap: 20px;
-    align-items: start;
+    gap: 12px;
+    /* align-items: start 제거 (기본값인 stretch를 사용하여 높이 자동 맞춤) */
+    /* 1행: 위험도 / 날씨 / 점검현황 (3분할) */
+    /* 2행: 위치별현황(넓게) / 히스토리(340px) */
+    grid-template-areas:
+        "risk weather report"
+        "main main    history";
+    grid-template-columns: 1fr 1fr 340px;
 }
+
+/* 관리자 모드 전용 레이아웃: 상단 3분할 및 위치별 현황 광폭 배치 */
+body.is-admin .dashboard-grid {
+    grid-template-areas:
+        "risk    weather report"
+        "main    main    history";
+    grid-template-columns: 1fr 1fr 340px;
+    /* 상단 3분할, 사이드바 340px 고정 */
+}
+
+/* 관리자 모드 개별 카드 보정 */
+body.is-admin .report-status-card {
+    width: 100%;
+    /* 상단 행에 맞춰 가변 */
+    justify-self: stretch;
+}
+
+body.is-admin .location-summary-card {
+    grid-area: main;
+    grid-column: span 2;
+    /* 위험도와 날씨 영역을 합쳐서 넓게 사용 */
+}
+
+body.is-admin .history-card {
+    grid-area: history;
+    width: 340px;
+}
+
+/* 주요 상태 카드 높이 통일 (위험도, 날씨, 점검현황) */
+.status-card,
+.weather-card,
+.report-status-card {
+    min-height: 160px;
+}
+
+/* 개별 카드별 영역 지정 */
+.status-card {
+    grid-area: risk;
+}
+
+.weather-card {
+    grid-area: weather;
+}
+
+.report-status-card {
+    grid-area: report;
+}
+
+.location-summary-card {
+    grid-area: main;
+}
+
+.history-card {
+    grid-area: history;
+}
+
+/* 공통 카드 스타일 및 보정 */
+.card {
+    width: 100%;
+    height: 100%;
+    /* 그리드 셀 높이에 맞춰 늘어남 */
+    box-sizing: border-box;
+}
+
+.card.history-card,
+.card.report-status-card {
+    min-width: 320px;
+    margin-top: 0;
+}
+
+.risk-weather-area {
+    display: contents;
+}
+
+/* 래퍼가 레이아웃에 영향을 주지 않도록 설정 */
 
 .column {
     display: flex;
@@ -282,23 +366,51 @@ h3 {
 .grid-2-col {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: var(--spacing-md);
+    gap: 12px;
+    /* 카드 사이 간격 12px */
 }
 
 /* Card Specifics */
 .card {
     background: white;
-    border-radius: 12px;
-    padding: 12px;
-    /* Hyper-reduced padding */
+    border-radius: 14px;
+    padding: 15px;
+    /* 20px -> 15px 축소 */
     box-shadow: var(--shadow-sm);
-    border-left: 5px solid var(--seah-blue);
     border: 1px solid #eef2f6;
-    /* Added subtle border */
     transition: transform 0.3s ease, box-shadow 0.3s ease;
     display: flex;
     flex-direction: column;
     min-height: fit-content;
+    gap: 10px;
+    /* 15px -> 10px 축소 */
+}
+
+/* 날씨 카드 전용 중앙 정렬 */
+.weather-card h3 {
+    text-align: center;
+    width: 100%;
+}
+
+.weather-card {
+    display: flex;
+    /* flexbox 활성화 */
+    flex-direction: column;
+    /* 세로 방향 정렬 */
+    justify-content: flex-start;
+    /* 제목을 상단에 고정 */
+    align-items: center;
+    /* 가로 중앙 정렬 */
+    /* text-align: center; 제거 (h3와 weather-horizontal-wrap에서 처리) */
+    /* justify-content: center; 제거 (제목 상단 고정으로 변경) */
+}
+
+.weather-horizontal-wrap {
+    flex: 1;
+    /* 남은 공간 모두 차지하여 중앙 정렬 기반 마련 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .card:hover {
@@ -310,11 +422,19 @@ h3 {
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
+    /* 제목을 처음에 배치하여 라인 일치 */
     text-align: center;
     background: linear-gradient(135deg, var(--seah-navy), #004a8d);
     color: white;
     border-left: 8px solid transparent;
+}
+
+.status-card>div:not(h3) {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    width: 100%;
 }
 
 h1 {
@@ -322,18 +442,18 @@ h1 {
 }
 
 h3 {
-    font-size: 1.1rem;
-    margin-bottom: 10px;
+    font-size: 1.25rem;
+    margin-bottom: 12px;
+    text-align: center;
 }
 
 .status-card h3 {
     color: white;
-    opacity: 0.8;
+    opacity: 0.9;
 }
 
 .status-value {
-    font-size: 2.2rem;
-    /* Reduced to fit in narrower card */
+    font-size: 2.8rem;
     font-weight: 800;
     margin: var(--spacing-sm) 0;
     white-space: nowrap;
@@ -356,24 +476,24 @@ h3 {
 }
 
 .weather-value {
-    font-size: 2.2rem;
+    font-size: 2.8rem;
     font-weight: 800;
     line-height: 1;
     color: var(--seah-blue);
-    margin-bottom: 2px;
+    margin-bottom: 5px;
 }
 
 .weather-loc {
-    font-size: 0.8rem;
+    font-size: 0.9rem;
     color: var(--seah-gray);
     margin-top: 5px;
 }
 
 .weather-sub-value {
-    font-size: 1.1rem;
+    font-size: 1.2rem;
     font-weight: 700;
     color: var(--seah-gray);
-    opacity: 0.8;
+    opacity: 0.9;
     margin-top: 2px;
 }
 
@@ -381,9 +501,6 @@ h3 {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 12px;
-    padding-left: 15px;
-    border-left: 1px dashed #ddd;
-    /* Vertical divider instead of horizontal */
 }
 
 .forecast-item {
@@ -659,8 +776,12 @@ h3 {
 .status-list {
     margin-top: var(--spacing-sm);
     display: grid;
-    grid-template-columns: repeat(8, 1fr);
-    gap: 8px;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+    /* 항목 간 간격 확대 */
+    width: 100%;
+    /* 너비 제한을 풀고 전체 공간 사용 */
+    /* 전체 너비를 약 15% 늘려 가독성 확보 */
 }
 
 .status-item {
@@ -1155,15 +1276,18 @@ body.is-admin .header-inputs.admin-only {
 .report-slots {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    margin-top: 15px;
+    gap: 8px;
+    /* 12px -> 8px 축소 */
+    margin-top: 8px;
+    /* 15px -> 8px 축소 */
 }
 
 .report-slot {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 15px;
+    padding: 8px 12px;
+    /* 10px/15px -> 8px/12px 축소 */
     background: rgba(255, 255, 255, 0.5);
     border-radius: 8px;
     border: 1px solid #eee;
@@ -1220,14 +1344,139 @@ body.is-admin .header-inputs.admin-only {
     color: var(--seah-gray);
 }
 
+/* 수정/삭제 버튼 스타일 */
+.action-btns {
+    display: flex;
+    gap: 4px;
+    justify-content: center;
+}
+
+.btn-edit {
+    background: #4dabf7 !important;
+    color: white !important;
+}
+
+.btn-delete {
+    background: #ff6b6b !important;
+    color: white !important;
+}
+
+.btn-edit:hover,
+.btn-delete:hover {
+    opacity: 0.8;
+}
+
+/* 페이지네이션 스타일 */
+/* 결로 분석 통계 카드 스타일 고도화 */
+.analysis-stats-container {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+    /* 간격 소폭 확대 */
+    margin: 25px auto 40px auto;
+    /* 중앙 정렬 및 여백 조정 */
+    max-width: 1600px;
+    /* 전체 너비 폭 확대 */
+    width: 100%;
+}
+
+.stat-card {
+    background: white;
+    padding: 30px 20px;
+    /* 패딩 확대 */
+    border-radius: 14px;
+    /* 라운딩 소폭 확대 */
+    border: 1px solid #eef2f6;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+    box-shadow: 0 6px 15px rgba(0, 0, 0, 0.04);
+    /* 그림자 강화 */
+    border-top: 5px solid #ced4da;
+    /* 기본 상단 라인 */
+    min-height: 180px;
+    /* 최소 높이 확보 */
+}
+
+.stat-card.stat-blue {
+    border-top-color: var(--seah-blue);
+}
+
+.stat-card.stat-red {
+    border-top-color: var(--status-danger);
+}
+
+.stat-label {
+    font-size: 0.9rem;
+    color: #495057;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+
+.stat-value-mini {
+    font-size: 2.2rem;
+    color: var(--seah-navy);
+    font-weight: 800;
+    line-height: 1;
+}
+
+.stat-sub-label {
+    font-size: 0.75rem;
+    color: #adb5bd;
+    font-weight: 500;
+    text-align: center;
+}
+
+/* 페이지네이션 스타일 보정 */
+.pagination-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 5px;
+    margin-top: 25px;
+    width: 100%;
+    /* 부모 너비 전체 사용 */
+}
+
+.btn-pagination {
+    padding: 6px 12px;
+    border: 1px solid #dce4ed;
+    background: white;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--seah-navy);
+    transition: all 0.2s;
+}
+
+.btn-pagination:hover:not(:disabled) {
+    background: var(--seah-light-blue);
+    border-color: var(--seah-blue);
+}
+
+.btn-pagination.active {
+    background: var(--seah-blue);
+    color: white;
+    border-color: var(--seah-blue);
+    box-shadow: 0 2px 4px rgba(0, 94, 184, 0.2);
+}
+
+.btn-pagination:disabled {
+    cursor: not-allowed;
+    opacity: 0.3;
+}
+
 .card-header-vertical,
 .card-header-column {
     display: flex;
     flex-direction: column;
     gap: 5px;
     /* Minimum gap */
-    margin-bottom: 8px;
-    /* Minimum margin */
+    margin-bottom: 0;
+    /* Removed margin to stick with calendar */
 }
 
 .calendar-nav {
@@ -1286,8 +1535,8 @@ body.is-admin .header-inputs.admin-only {
     border: 1px solid #eee;
     border-radius: 4px;
     overflow: hidden;
-    margin-top: auto;
-    /* Push to bottom of card if needed */
+    margin-top: 0;
+    /* Removed auto margin to stick with header */
 }
 
 .calendar-grid {
@@ -1309,9 +1558,9 @@ body.is-admin .header-inputs.admin-only {
 }
 
 .calendar-day {
-    padding: 2px;
-    height: 52px;
-    /* Increased to fix 15시 cutoff */
+    padding: 4px;
+    height: 80px;
+    /* 기존 52px에서 80px로 확대하여 캘린더 높이 증가 */
     border-bottom: 1px solid #eee;
     border-right: 1px solid #eee;
     cursor: pointer;

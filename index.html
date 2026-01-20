@@ -74,155 +74,137 @@
 
     <div id="dashboard-view" class="view-content active">
         <section class="dashboard-grid">
-            <!-- 1단 (중앙): 현황 및 요약 -->
-            <div class="column main-content">
-                <div class="grid-2-col">
-                    <div class="card status-card" id="risk-indicator">
-                        <h3>현재 결로 위험도</h3>
-
-                        <div style="display: flex; align-items: center; justify-content: space-around; width: 100%;">
-                            <!-- 위험도 결과 -->
-                            <div style="text-align: center; flex: 1;">
-                                <div class="status-value" id="status-text">데이터 부족
-                                </div>
-                                <p id="risk-reason-text" class="status-reason"
-                                    style="margin-top: 2px; font-size: 0.8rem; opacity: 0.9;">분석 대기 중</p>
+            <!-- 상단 정보 영역 (위험도 + 날씨) -->
+            <div class="risk-weather-area">
+                <!-- 현재 결로 위험도 -->
+                <div class="card status-card" id="risk-indicator">
+                    <h3>현재 결로 위험도</h3>
+                    <div style="display: flex; align-items: center; justify-content: space-around; width: 100%;">
+                        <div style="text-align: center; flex: 1;">
+                            <div class="status-value" id="status-text">데이터 부족</div>
+                            <p id="risk-reason-text" class="status-reason"
+                                style="margin-top: 2px; font-size: 0.8rem; opacity: 0.9;">분석 대기 중</p>
+                        </div>
+                        <div style="width: 1px; height: 50px; background: rgba(255,255,255,0.2); margin: 0 8px;"></div>
+                        <div class="metrics-row" style="display: flex; gap: 10px; flex: 1; justify-content: center;">
+                            <div class="metric-box" style="text-align: center;">
+                                <span
+                                    style="font-size: 0.8em; color: #ddd; display: block; margin-bottom: 2px;">이슬점</span>
+                                <strong id="dew-point-val" style="font-size: 1.25em; color: white;">--</strong>
                             </div>
-
-                            <!-- 구분선 -->
-                            <div style="width: 1px; height: 50px; background: rgba(255,255,255,0.2); margin: 0 8px;">
-                            </div>
-
-                            <!-- 상세 지표 -->
-                            <div class="metrics-row"
-                                style="display: flex; gap: 10px; flex: 1; justify-content: center;">
-                                <div class="metric-box" style="text-align: center;">
-                                    <span
-                                        style="font-size: 0.8em; color: #ddd; display: block; margin-bottom: 2px;">이슬점</span>
-                                    <strong id="dew-point-val" style="font-size: 1.25em; color: white;">--</strong>
-                                </div>
-                                <div class="metric-box" style="text-align: center;">
-                                    <span
-                                        style="font-size: 0.8em; color: #ddd; display: block; margin-bottom: 2px;">온도차</span>
-                                    <strong id="temp-diff-val" style="font-size: 1.25em; color: white;">--</strong>
-                                </div>
+                            <div class="metric-box" style="text-align: center;">
+                                <span
+                                    style="font-size: 0.8em; color: #ddd; display: block; margin-bottom: 2px;">온도차</span>
+                                <strong id="temp-diff-val" style="font-size: 1.25em; color: white;">--</strong>
                             </div>
                         </div>
                     </div>
+                </div>
 
-                    <div class="card weather-card">
-                        <h3>날씨정보</h3>
-                        <div class="weather-horizontal-wrap">
+                <!-- 날씨정보 -->
+                <div class="card weather-card">
+                    <h3>날씨정보</h3>
+                    <div class="weather-horizontal-wrap" style="justify-content: space-around; width: 100%;">
+                        <div style="display: flex; align-items: center; justify-content: center; flex: 1; gap: 15px;">
                             <div class="weather-main">
                                 <div class="weather-value" id="outdoor-temp">--°C</div>
                                 <div class="weather-sub-value" id="outdoor-humidity">습도: --%</div>
                                 <p class="weather-loc">군산 세아씨엠</p>
                             </div>
-                            <div id="weather-icon-container" class="weather-icon-display">
-                                <!-- JS inserts SVG/Icon here -->
+                            <div id="weather-icon-container" class="weather-icon-display"></div>
+                        </div>
+                        <div style="width: 1px; height: 50px; background: rgba(0,0,0,0.1); margin: 0 8px;"></div>
+                        <div class="weather-forecast-grid" style="flex: 1; justify-content: center;">
+                            <div class="forecast-item">
+                                <span class="f-label">오전</span>
+                                <div class="f-data"><span class="f-sub-label">강수:</span><strong
+                                        id="weather-am-rain">--</strong></div>
+                                <div class="f-data"><span class="f-sub-label">확률:</span><span class="f-prob"
+                                        id="weather-am-prob">--%</span></div>
                             </div>
-                            <div class="weather-forecast-grid">
-                                <div class="forecast-item">
-                                    <span class="f-label">오전</span>
-                                    <div class="f-data">
-                                        <span class="f-sub-label">강수:</span>
-                                        <strong id="weather-am-rain">--</strong>
-                                    </div>
-                                    <div class="f-data">
-                                        <span class="f-sub-label">확률:</span>
-                                        <span class="f-prob" id="weather-am-prob">--%</span>
-                                    </div>
-                                </div>
-                                <div class="forecast-item">
-                                    <span class="f-label">오후</span>
-                                    <div class="f-data">
-                                        <span class="f-sub-label">강수:</span>
-                                        <strong id="weather-pm-rain">--</strong>
-                                    </div>
-                                    <div class="f-data">
-                                        <span class="f-sub-label">확률:</span>
-                                        <span class="f-prob" id="weather-pm-prob">--%</span>
-                                    </div>
-                                </div>
+                            <div class="forecast-item">
+                                <span class="f-label">오후</span>
+                                <div class="f-data"><span class="f-sub-label">강수:</span><strong
+                                        id="weather-pm-rain">--</strong></div>
+                                <div class="f-data"><span class="f-sub-label">확률:</span><span class="f-prob"
+                                        id="weather-pm-prob">--%</span></div>
                             </div>
                         </div>
-                    </div>
-                </div>
-
-                <div class="card location-summary-card mt-md">
-                    <div class="location-summary-header">
-                        <div class="header-title">
-                            <h3>위치별 최신 현황 <span id="location-sync-time"
-                                    style="font-size: 0.85rem; font-weight: normal; color: #666; margin-left: 8px;"></span>
-                            </h3>
-                        </div>
-                        <div class="header-inputs admin-only">
-                            <div class="input-row-mini">
-                                <input type="date" id="report-date" class="mini-input-field">
-                                <select id="report-time" class="mini-input-field">
-                                    <option value="07:00">07:00</option>
-                                    <option value="15:00">15:00</option>
-                                    <option value="실시간">실시간</option>
-                                </select>
-                                <div class="mini-input-wrap">
-                                    <span class="mini-label">외온:</span>
-                                    <input type="number" id="outdoor-temp-input" step="0.1"
-                                        class="mini-input-field weather-sync" style="width: 75px;">
-                                </div>
-                                <div class="mini-input-wrap">
-                                    <span class="mini-label">외습:</span>
-                                    <input type="number" id="outdoor-humidity-input" step="1"
-                                        class="mini-input-field weather-sync" style="width: 70px;">
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div id="location-status-list" class="status-list">
-                        <!-- JavaScript에서 렌더링됨 -->
                     </div>
                 </div>
             </div>
 
-            <!-- 3단 (오른쪽): 보고 및 지표 -->
-            <div class="column side-right">
-                <div class="card report-status-card">
-                    <div class="report-status-header">
-                        <h3>정기 점검 현황</h3>
-                        <input type="date" id="status-inspection-date" class="status-date-input">
-                    </div>
-                    <div class="report-slots">
-                        <div class="report-slot" id="slot-0700">
-                            <span class="slot-time">07:00</span>
-                            <span class="slot-status">미등록</span>
-                            <div class="slot-actions">
-                                <button id="edit-btn-0700" class="btn-mini btn-primary-mini">기록</button>
-                                <button id="view-btn-0700" class="btn-mini btn-secondary-mini" disabled>조회</button>
-                            </div>
+            <!-- 정기 점검 현황 -->
+            <div class="card report-status-card" style="grid-area: report;">
+                <div class="report-status-header">
+                    <h3>정기 점검 현황</h3>
+                    <input type="date" id="status-inspection-date" class="status-date-input">
+                </div>
+                <div class="report-slots">
+                    <div class="report-slot" id="slot-0700">
+                        <span class="slot-time">07:00</span>
+                        <span class="slot-status">미등록</span>
+                        <div class="slot-actions">
+                            <button id="edit-btn-0700" class="btn-mini btn-primary-mini">기록</button>
+                            <button id="view-btn-0700" class="btn-mini btn-secondary-mini" disabled>조회</button>
                         </div>
-                        <div class="report-slot" id="slot-1500">
-                            <span class="slot-time">15:00</span>
-                            <span class="slot-status">미등록</span>
-                            <div class="slot-actions">
-                                <button id="edit-btn-1500" class="btn-mini btn-primary-mini">기록</button>
-                                <button id="view-btn-1500" class="btn-mini btn-secondary-mini" disabled>조회</button>
+                    </div>
+                    <div class="report-slot" id="slot-1500">
+                        <span class="slot-time">15:00</span>
+                        <span class="slot-status">미등록</span>
+                        <div class="slot-actions">
+                            <button id="edit-btn-1500" class="btn-mini btn-primary-mini">기록</button>
+                            <button id="view-btn-1500" class="btn-mini btn-secondary-mini" disabled>조회</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 위치별 최신 현황 -->
+            <div class="card location-summary-card" style="grid-area: main;">
+                <div class="location-summary-header">
+                    <div class="header-title">
+                        <h3>위치별 최신 현황 <span id="location-sync-time"
+                                style="font-size: 0.85rem; font-weight: normal; color: #666; margin-left: 8px;"></span>
+                        </h3>
+                    </div>
+                    <div class="header-inputs admin-only">
+                        <div class="input-row-mini">
+                            <input type="date" id="report-date" class="mini-input-field">
+                            <select id="report-time" class="mini-input-field">
+                                <option value="07:00">07:00</option>
+                                <option value="15:00">15:00</option>
+                                <option value="실시간">실시간</option>
+                            </select>
+                            <div class="mini-input-wrap">
+                                <span class="mini-label">외온:</span>
+                                <input type="number" id="outdoor-temp-input" step="0.1"
+                                    class="mini-input-field weather-sync" style="width: 75px;">
+                            </div>
+                            <div class="mini-input-wrap">
+                                <span class="mini-label">외습:</span>
+                                <input type="number" id="outdoor-humidity-input" step="1"
+                                    class="mini-input-field weather-sync" style="width: 70px;">
                             </div>
                         </div>
                     </div>
                 </div>
+                <div id="location-status-list" class="status-list"></div>
+            </div>
 
-                <div class="card history-card mt-md">
-                    <div class="card-header-column">
-                        <h3>점검 기록 히스토리</h3>
-                        <p style="font-size: 0.85rem; color: #666; margin-bottom: 5px;">📅 날짜를 클릭하여 상세 이력을 조회하세요.</p>
-                        <div class="calendar-nav">
-                            <button onclick="changeMonth(-1)" class="btn-cal-nav">&lt;</button>
-                            <span id="calendar-month-year">2024년 1월</span>
-                            <button onclick="changeMonth(1)" class="btn-cal-nav">&gt;</button>
-                        </div>
+            <!-- 점검 기록 히스토리 -->
+            <div class="card history-card" style="grid-area: history;">
+                <div class="card-header-column">
+                    <h3>점검 기록 히스토리</h3>
+                    <p style="font-size: 0.85rem; color: #666; margin-bottom: 0;">📅 날짜를 클릭하여 상세 이력을 조회하세요.</p>
+                    <div class="calendar-nav">
+                        <button onclick="changeMonth(-1)" class="btn-cal-nav">&lt;</button>
+                        <span id="calendar-month-year">2024년 1월</span>
+                        <button onclick="changeMonth(1)" class="btn-cal-nav">&gt;</button>
                     </div>
-                    <div id="calendar-container" class="calendar-container">
-                        <!-- JS에서 동적 생성 -->
-                    </div>
+                </div>
+                <div id="calendar-container" class="calendar-container">
+                    <!-- JS에서 동적 생성 -->
                 </div>
             </div>
         </section>
@@ -393,61 +375,61 @@
         <section class="card full-width">
             <div class="forecast-header">
                 <div>
-                    <h2>🚨 결로 발생 분석 및 이력</h2>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <h2>🚨 결로 발생 분석 및 이력</h2>
+                        <button onclick="openPastRecordModal()" class="btn-nav admin-only"
+                            style="background: var(--seah-orange); color: white;">➕ 과거 이력 등록</button>
+                    </div>
                     <p class="text-muted">축적된 과거 결로 발생 데이터를 토대로 주간 예보의 정확도를 높입니다.</p>
                 </div>
-                <button onclick="updateCondensationHistory()" class="btn-refresh">🔄 새로고침</button>
-                <button onclick="openPastRecordModal()" class="btn-refresh"
-                    style="color: var(--seah-orange); border-color: var(--seah-orange);">➕ 과거 기록 등록</button>
-            </div>
 
-            <!-- 결로 발생 환경 분석 요약 섹션 -->
-            <div id="history-analysis-container" class="analysis-summary-grid mt-md">
-                <div class="analysis-card active-card">
-                    <div class="analysis-label">총 발생 횟수</div>
-                    <div class="analysis-value" id="stat-total-count">- 건</div>
-                    <div class="analysis-desc">기점: 수동 등록 및 점검 결과 합계</div>
+                <!-- 결로 분석 상단 카드 -->
+                <div class="analysis-stats-container mt-md">
+                    <div class="stat-card stat-blue">
+                        <span class="stat-label">총 발생 횟수</span>
+                        <strong id="stat-total-count" class="stat-value-mini">0 건</strong>
+                        <span class="stat-sub-label">기준: 수동 등록 및 점검 결과 합계</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">주요 발생 외기온도</span>
+                        <strong id="stat-avg-outdoor-temp" class="stat-value-mini">- °C</strong>
+                        <span class="stat-sub-label">최빈 발생 구간 분석 결과</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">평균 발생 외기습도</span>
+                        <strong id="stat-avg-outdoor-hum" class="stat-value-mini">- %</strong>
+                        <span class="stat-sub-label">기상 예보 연동 시 주요 선행 지표</span>
+                    </div>
+                    <div class="stat-card stat-red">
+                        <span class="stat-label">평균 온도차 (소재-이슬점)</span>
+                        <strong id="stat-avg-diff" class="stat-value-mini">- °C</strong>
+                        <span class="stat-sub-label">발생 시 평균 이슬점 근접도</span>
+                    </div>
                 </div>
-                <div class="analysis-card">
-                    <div class="analysis-label">주요 발생 외기온도</div>
-                    <div class="analysis-value" id="stat-avg-outdoor-temp">- °C</div>
-                    <div class="analysis-desc">최빈 발생 구간 분석 결과</div>
+                <div class="table-container mt-md">
+                    <table class="report-table">
+                        <thead>
+                            <tr>
+                                <th>발생일시</th>
+                                <th>위치</th>
+                                <th title="외기온도">외온</th>
+                                <th title="외기습도">외습</th>
+                                <th title="실내온도">내온</th>
+                                <th title="실내습도">내습</th>
+                                <th>이슬점</th>
+                                <th title="소재온도">소재</th>
+                                <th>온도차</th>
+                                <th>발생원인</th>
+                                <th class="admin-only">관리</th>
+                            </tr>
+                        </thead>
+                        <tbody id="history-log-body">
+                            <!-- JS Inject -->
+                        </tbody>
+                    </table>
                 </div>
-                <div class="analysis-card">
-                    <div class="analysis-label">평균 발생 외기습도</div>
-                    <div class="analysis-value" id="stat-avg-outdoor-hum">- %</div>
-                    <div class="analysis-desc">기상 예보 연동 시 주요 선행 지표</div>
-                </div>
-                <div class="analysis-card warning-card">
-                    <div class="analysis-label">평균 온도차 (소재-이슬점)</div>
-                    <div class="analysis-value" id="stat-avg-diff">- °C</div>
-                    <div class="analysis-desc">발생 시 평균 이슬점 근접도</div>
-                </div>
-            </div>
-
-            <div class="table-container mt-md">
-                <table class="report-table">
-                    <thead>
-                        <tr>
-                            <th>발생일시</th>
-                            <th>위치</th>
-                            <th title="외기온도">외온</th>
-                            <th title="외기습도">외습</th>
-                            <th title="실내온도">내온</th>
-                            <th title="실내습도">내습</th>
-                            <th>이슬점</th>
-                            <th title="소재온도">소재</th>
-                            <th>온도차</th>
-                            <th>발생원인</th>
-                            <th class="admin-only">관리</th>
-                        </tr>
-                    </thead>
-                    <tbody id="history-log-body">
-                        <!-- JS Inject -->
-                    </tbody>
-                </table>
-            </div>
-            <div id="history-message" class="text-center mt-md text-muted">데이터를 조회 중입니다...</div>
+                <div id="history-pagination" class="pagination-container mt-md"></div>
+                <div id="history-message" class="text-center mt-md text-muted">데이터를 조회 중입니다...</div>
         </section>
     </div>
     </div>
