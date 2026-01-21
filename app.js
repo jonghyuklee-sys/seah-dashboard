@@ -74,7 +74,7 @@ function calculateDewPoint(T, RH) {
 
 function getRiskLevel(tempDiff, humidity) {
     // 습도가 높을수록(현장 상황 반영) 위험도 가중
-    const humidityWeight = humidity > 70 ? 1.0 : 0;
+    const humidityWeight = humidity > 80 ? 1.0 : 0;
     const adjustedDiff = tempDiff - humidityWeight;
 
     if (adjustedDiff > 5) return {
@@ -2384,16 +2384,16 @@ function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb,
         else status.reason = `초고습(${currentAvgHum}%↑) 환경 위험`;
     }
     // 2. 주의 (Caution) 판정 기준
-    else if (currentTempDiff >= 8 || currentAvgHum >= 70 || tempJump >= 8 || isDeepFreeze && maxRainProb >= 60) {
+    else if (currentTempDiff >= 8 || currentAvgHum >= 80 || tempJump >= 8 || isDeepFreeze && maxRainProb >= 60) {
         status.risk = '주의';
         status.fan = true;
 
-        const isHeaterNeed = (tempJump >= 10 || currentAvgHum >= 80 || (tempJump >= 8 && currentAvgHum >= 70));
+        const isHeaterNeed = (tempJump >= 10 || currentAvgHum >= 80 || (tempJump >= 8 && currentAvgHum >= 80));
         status.heater = isHeaterNeed;
 
         if (isDeepFreeze && maxRainProb >= 60) status.reason = `한파 중 강수 예보 (고습도 주의)`;
         else if (tempJump >= 8) status.reason = `기온 상승 추세(${tempJump}℃↑) 주의`;
-        else if (currentAvgHum >= 70) status.reason = `습도 증가(${currentAvgHum}%↑) 주의`;
+        else if (currentAvgHum >= 80) status.reason = `습도 증가(${currentAvgHum}%↑) 주의`;
         else status.reason = `일교차(${currentTempDiff}℃) 주의 구간`;
 
         if (isDeepFreeze && currentAvgHum < 75 && maxRainProb < 50) {
