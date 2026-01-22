@@ -346,6 +346,15 @@
                 <!-- JS에서 7일간의 예측 카드를 생성합니다 -->
             </div>
 
+            <!-- 당일 시간별 습도 예보 -->
+            <div class="hourly-humidity-card card mt-lg">
+                <h4>💧 오늘의 시간별 습도 예보 <span id="hourly-update-time"></span></h4>
+                <p class="text-muted" style="margin-bottom: 12px; font-size: 0.85rem;">기상청 단기예보 기준 (1시간 단위)</p>
+                <div id="hourly-humidity-grid" class="hourly-humidity-grid">
+                    <div class="hourly-loading">데이터를 불러오는 중...</div>
+                </div>
+            </div>
+
             <div class="equipment-guide-card card mt-lg">
                 <h4>🛠️ 설비 가동 기준 안내</h4>
                 <div class="guide-grid" style="grid-template-columns: 1fr 1fr;">
