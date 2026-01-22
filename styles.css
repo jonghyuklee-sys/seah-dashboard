@@ -74,6 +74,8 @@ body.is-admin .admin-badge {
     font-size: 1.1rem;
     text-align: center;
     letter-spacing: 5px;
+    -webkit-text-security: disc;
+    /* 인풋 내용을 암호처럼 숨김 */
 }
 
 .pwd-btns {
