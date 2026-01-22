@@ -2114,14 +2114,21 @@ async function fetchHourlyHumidityForecast(targetDateStr = null) {
             if (hourlyData.length > 0) {
                 console.log(`✅ 시간별 습도 예보 ${hourlyData.length}개 로드 완료 (1시간 단위)`);
 
-                // Firebase에 오늘 데이터 저장
+                // Firebase에 오늘 데이터 저장 (11월 ~ 3월 기간에만 저장)
                 if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
-                    const formattedDate = getLocalDateString();
-                    firebase.database().ref(`hourlyForecasts/${formattedDate}`).set({
-                        data: hourlyData,
-                        updatedAt: Date.now()
-                    });
-                    console.log(`💾 시간별 습도 예보 Firebase 저장 완료 (${formattedDate})`);
+                    const currentMonth = now.getMonth(); // 0: 1월, 10: 11월, 11: 12월
+                    const isWinterSeason = currentMonth >= 10 || currentMonth <= 2; // 11, 12, 1, 2, 3월
+
+                    if (isWinterSeason) {
+                        const formattedDate = getLocalDateString();
+                        firebase.database().ref(`hourlyForecasts/${formattedDate}`).set({
+                            data: hourlyData,
+                            updatedAt: Date.now()
+                        });
+                        console.log(`💾 시간별 습도 예보 Firebase 저장 완료 (${formattedDate}, 동절기)`);
+                    } else {
+                        console.log('☀️ 하절기(4월~10월)이므로 습도 예보 데이터를 저장하지 않습니다.');
+                    }
                 }
 
                 return hourlyData;
