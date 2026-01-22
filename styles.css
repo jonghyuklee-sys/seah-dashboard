@@ -3379,10 +3379,19 @@ body.is-admin .header-inputs.admin-only {
 .hourly-humidity-card h4 {
     color: var(--seah-navy);
     font-size: 1.1rem;
-    margin-bottom: 4px;
+    margin-bottom: 0px;
     display: flex;
     align-items: center;
     gap: 8px;
+    flex: 1;
+}
+
+.card-header-flex {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    margin-bottom: 5px;
 }
 
 #hourly-update-time {

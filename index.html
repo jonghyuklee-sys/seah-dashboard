@@ -348,7 +348,11 @@
 
             <!-- 당일 시간별 습도 예보 -->
             <div class="hourly-humidity-card card mt-lg">
-                <h4>💧 오늘의 시간별 습도 예보 <span id="hourly-update-time"></span></h4>
+                <div class="card-header-flex"
+                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                    <h4>💧 시간별 습도 예보 <span id="hourly-update-time"></span></h4>
+                    <input type="date" id="hourly-forecast-date" class="status-date-input" style="width: auto;">
+                </div>
                 <p class="text-muted" style="margin-bottom: 12px; font-size: 0.85rem;">기상청 단기예보 기준 (1시간 단위)</p>
                 <div id="hourly-humidity-grid" class="hourly-humidity-grid">
                     <div class="hourly-loading">데이터를 불러오는 중...</div>

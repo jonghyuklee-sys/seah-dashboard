@@ -1356,6 +1356,14 @@ function setupEventListeners() {
             closeModal();
         }
     };
+
+    // 시간별 습도 날짜 선택 이벤트
+    const hourlyDateInput = document.getElementById('hourly-forecast-date');
+    if (hourlyDateInput) {
+        hourlyDateInput.addEventListener('change', (e) => {
+            updateHourlyHumidity(e.target.value);
+        });
+    }
 }
 
 // ========== 15. 초기화 ==========
@@ -1366,6 +1374,10 @@ function init() {
     const todayStr = getLocalDateString();
     if (elements.reportDate) {
         elements.reportDate.value = todayStr;
+    }
+    const hourlyDateInput = document.getElementById('hourly-forecast-date');
+    if (hourlyDateInput) {
+        hourlyDateInput.value = todayStr;
     }
 
     // 시계 업데이트
@@ -2033,9 +2045,16 @@ function updateManagementGuide(forecast) {
  * 당일 시간별 습도 예보를 가져옵니다.
  * 기상청 단기예보 API에서 REH(습도) 데이터를 추출합니다.
  */
-async function fetchHourlyHumidityForecast() {
+async function fetchHourlyHumidityForecast(targetDateStr = null) {
     const API_KEY = kmaShortApiKey;
     const nx = 56, ny = 92;
+    const todayStr = getLocalDateString().replace(/-/g, '');
+    const dateToFetch = targetDateStr ? targetDateStr.replace(/-/g, '') : todayStr;
+
+    // 만약 요청한 날짜가 오늘이 아니라면 Firebase에서 데이터를 찾아봅니다.
+    if (dateToFetch !== todayStr) {
+        return await loadHistoricalHourlyHumidity(targetDateStr);
+    }
 
     if (!API_KEY || API_KEY.length < 10) {
         console.warn('시간별 습도 예보: API 키 미설정');
@@ -2044,8 +2063,6 @@ async function fetchHourlyHumidityForecast() {
 
     try {
         const now = new Date();
-        const todayStr = getLocalDateString().replace(/-/g, '');
-
         // 발표 시간 계산 (단기예보)
         const baseTimes = [23, 20, 17, 14, 11, 8, 5, 2];
         let fcstBaseTime = 2, fcstBaseDate = todayStr;
@@ -2094,8 +2111,21 @@ async function fetchHourlyHumidityForecast() {
                 }
             });
 
-            console.log(`✅ 시간별 습도 예보 ${hourlyData.length}개 로드 완료 (1시간 단위)`);
-            return hourlyData;
+            if (hourlyData.length > 0) {
+                console.log(`✅ 시간별 습도 예보 ${hourlyData.length}개 로드 완료 (1시간 단위)`);
+
+                // Firebase에 오늘 데이터 저장
+                if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+                    const formattedDate = getLocalDateString();
+                    firebase.database().ref(`hourlyForecasts/${formattedDate}`).set({
+                        data: hourlyData,
+                        updatedAt: Date.now()
+                    });
+                    console.log(`💾 시간별 습도 예보 Firebase 저장 완료 (${formattedDate})`);
+                }
+
+                return hourlyData;
+            }
         }
 
         return null;
@@ -2106,20 +2136,51 @@ async function fetchHourlyHumidityForecast() {
 }
 
 /**
+ * Firebase에서 과거 시간별 습도 데이터를 불러옵니다.
+ */
+async function loadHistoricalHourlyHumidity(dateStr) {
+    if (typeof firebase === 'undefined' || firebase.apps.length === 0) return null;
+
+    try {
+        const snapshot = await firebase.database().ref(`hourlyForecasts/${dateStr}`).once('value');
+        const val = snapshot.val();
+        if (val && val.data) {
+            console.log(`📦 Firebase에서 과거 습도 데이터 로드 완료 (${dateStr})`);
+            return val.data;
+        }
+    } catch (e) {
+        console.error('Firebase 과거 데이터 로드 에러:', e);
+    }
+    return null;
+}
+
+/**
  * 시간별 습도 예보를 화면에 표시합니다.
  */
-function displayHourlyHumidity(data) {
+function displayHourlyHumidity(data, targetDateStr = null) {
     const grid = document.getElementById('hourly-humidity-grid');
     const updateTimeEl = document.getElementById('hourly-update-time');
+    const dateInput = document.getElementById('hourly-forecast-date');
     if (!grid) return;
 
+    const todayStr = getLocalDateString();
+    const isToday = !targetDateStr || targetDateStr === todayStr;
+
     if (updateTimeEl) {
-        const nowStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-        updateTimeEl.textContent = `(최종 업데이트: ${nowStr})`;
+        if (isToday) {
+            const nowStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+            updateTimeEl.textContent = `(실시간 예보: ${nowStr})`;
+        } else {
+            updateTimeEl.textContent = `(${targetDateStr} 기록)`;
+        }
+    }
+
+    if (dateInput && !dateInput.value) {
+        dateInput.value = targetDateStr || todayStr;
     }
 
     if (!data || data.length === 0) {
-        grid.innerHTML = '<div class="hourly-no-data">시간별 습도 데이터를 가져오지 못했습니다.</div>';
+        grid.innerHTML = `<div class="hourly-no-data">${isToday ? '시간별 습도 데이터를 가져오지 못했습니다.' : '해당 날짜의 저장된 기록이 없습니다.'}</div>`;
         return;
     }
 
@@ -2131,12 +2192,13 @@ function displayHourlyHumidity(data) {
     const pmData = data.filter(item => parseInt(item.time.split(':')[0]) >= 12);
 
     const renderItems = (items) => {
-        if (items.length === 0) return '<div class="hourly-no-data" style="grid-column: span 12;">해당 시간대 예보 데이터가 없습니다. (예보 시간이 지남)</div>';
+        if (items.length === 0) return '<div class="hourly-no-data" style="grid-column: span 12;">해당 시간대 데이터가 없습니다.</div>';
 
         return items.map(item => {
             const hour = parseInt(item.time.split(':')[0]);
-            const isPast = hour < currentHour;
-            const isCurrent = hour === currentHour;
+            // 오늘인 경우에만 과거 시간 회색 처리 및 현재 시간 표시
+            const isPast = isToday && hour < currentHour;
+            const isCurrent = isToday && hour === currentHour;
 
             // 습도 수준에 따른 클래스 결정
             let humClass = '';
@@ -2150,7 +2212,7 @@ function displayHourlyHumidity(data) {
 
             return `
                 <div class="hourly-humidity-item ${humClass}" style="${currentStyle}${pastStyle}" title="${item.time} 습도: ${item.humidity}%">
-                    <span class="hourly-time">${item.time.substring(0, 2)}시${isCurrent ? ' ★' : ''}</span>
+                    <span class="hourly-time">${item.time.substring(0, 2)}시</span>
                     <span class="hourly-value">${item.humidity}%</span>
                 </div>
             `;
@@ -2159,11 +2221,11 @@ function displayHourlyHumidity(data) {
 
     grid.innerHTML = `
         <div class="hourly-section">
-            <div class="hourly-section-label">🌅 AM <span>오전 예보</span></div>
+            <div class="hourly-section-label">🌅 AM <span>오전 ${isToday ? '예보' : '기록'}</span></div>
             <div class="hourly-section-items">${renderItems(amData)}</div>
         </div>
         <div class="hourly-section">
-            <div class="hourly-section-label">🌇 PM <span>오후 예보</span></div>
+            <div class="hourly-section-label">🌇 PM <span>오후 ${isToday ? '예보' : '기록'}</span></div>
             <div class="hourly-section-items">${renderItems(pmData)}</div>
         </div>
     `;
@@ -2172,14 +2234,18 @@ function displayHourlyHumidity(data) {
 /**
  * 주간 예측 화면에서 시간별 습도 예보를 업데이트합니다.
  */
-async function updateHourlyHumidity() {
+async function updateHourlyHumidity(targetDate = null) {
     const grid = document.getElementById('hourly-humidity-grid');
+    const dateInput = document.getElementById('hourly-forecast-date');
     if (!grid) return;
 
-    grid.innerHTML = '<div class="hourly-loading">시간별 습도 데이터를 불러오는 중...</div>';
+    const todayStr = getLocalDateString();
+    const dateToLoad = targetDate || (dateInput ? dateInput.value : todayStr) || todayStr;
 
-    const data = await fetchHourlyHumidityForecast();
-    displayHourlyHumidity(data);
+    grid.innerHTML = '<div class="hourly-loading">데이터를 불러오는 중...</div>';
+
+    const data = await fetchHourlyHumidityForecast(dateToLoad);
+    displayHourlyHumidity(data, dateToLoad);
 }
 
 
