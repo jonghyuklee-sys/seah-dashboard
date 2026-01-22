@@ -1330,6 +1330,16 @@ function setupEventListeners() {
         });
     }
 
+    // 관리자 암호 입력 Enter 키 이벤트
+    const adminPwdInput = document.getElementById('admin-pwd-input');
+    if (adminPwdInput) {
+        adminPwdInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                loginAdmin();
+            }
+        });
+    }
+
     // 날짜 변경 이벤트
     const globalDateInput = document.getElementById('report-date');
     const statusDateInput = document.getElementById('status-inspection-date');
