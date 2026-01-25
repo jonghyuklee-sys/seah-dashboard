@@ -1402,8 +1402,10 @@ function init() {
         updateWeatherData();
     }, 3600000);
 
-    // 초기 날씨 로드
+    // 초기 날씨 및 예보 데이터 로드
     updateWeatherData();
+    updateWeeklyForecast();
+    updateHourlyHumidity();
 
     // 시간대별 초기값 설정
     if (elements.reportTime) {
@@ -1504,15 +1506,11 @@ function init() {
         // 현재 시각 업데이트 (대시보드 상단)
         updateCurrentTime();
 
-        // 30분마다 날씨 업데이트
-        if (minuteCount % 30 === 0) {
-            console.log('⏰ 실시간 날씨 자동 갱신');
+        // 360분(6시간)마다 모든 기상 정보(실시간, 주간예보, 시간별습도) 업데이트
+        // 기상청 데이터가 대략 3시간 주기로 갱신되므로, 6시간 주기는 비용 절감과 데이터 정확도 사이의 최적점입니다.
+        if (minuteCount % 360 === 0) {
+            console.log('⏰ 기상 데이터 자동 갱신 (날씨/예보/습도) - 6시간 주기');
             updateWeatherData();
-        }
-
-        // 60분(1시간)마다 주간 예보 및 시간별 습도 업데이트 체크
-        if (minuteCount % 60 === 0) {
-            console.log('⏰ 주간 예보 및 시간별 습도 자동 갱신');
             updateWeeklyForecast();
             updateHourlyHumidity();
         }
@@ -1568,30 +1566,33 @@ async function refreshWeeklyForecast() {
 }
 
 async function updateWeeklyForecast() {
+    const todayStr = getLocalDateString().replace(/-/g, '');
     const grid = document.getElementById('weekly-forecast-grid');
-    if (!grid) return;
 
-    grid.innerHTML = '<p class="text-center" style="grid-column: span 7;">7일 예보 데이터를 확인 중입니다...</p>';
+    // UI 로딩 표시 (그리드가 있을 때만)
+    if (grid) {
+        grid.innerHTML = '<p class="text-center" style="grid-column: span 7;">7일 예보 데이터를 확인 중입니다...</p>';
+    }
 
     try {
-        const todayStr = getLocalDateString().replace(/-/g, '');
         // 단기예보와 중기예보 키 확인
         const SHORT_API_KEY = kmaShortApiKey;
         const MID_API_KEY = kmaMidApiKey;
-
         // API 키 검증 먼저 수행
         if (!SHORT_API_KEY || SHORT_API_KEY.length < 10) {
             console.error('❌ 단기예보 API 키가 설정되지 않았습니다.');
-            grid.innerHTML = `
-                <p class="text-center" style="grid-column: span 7; color: #ff4444; padding: 20px;">
-                    ⚠️ 기상청 API 키가 설정되지 않았습니다.<br><br>
-                    <strong>Firebase Console</strong>에서 다음 경로에 API 키를 추가해주세요:<br>
-                    <code style="background: #f0f0f0; padding: 5px 10px; border-radius: 4px;">
-                        settings/kma_short_api_key
-                    </code><br><br>
-                    자세한 내용은 <strong>FIREBASE_API_SETUP.md</strong> 파일을 참고하세요.
-                </p>
-            `;
+            if (grid) {
+                grid.innerHTML = `
+                    <p class="text-center" style="grid-column: span 7; color: #ff4444; padding: 20px;">
+                        ⚠️ 기상청 API 키가 설정되지 않았습니다.<br><br>
+                        <strong>Firebase Console</strong>에서 다음 경로에 API 키를 추가해주세요:<br>
+                        <code style="background: #f0f0f0; padding: 5px 10px; border-radius: 4px;">
+                            settings/kma_short_api_key
+                        </code><br><br>
+                        자세한 내용은 <strong>FIREBASE_API_SETUP.md</strong> 파일을 참고하세요.
+                    </p>
+                `;
+            }
             return;
         }
 
@@ -2061,6 +2062,21 @@ async function fetchHourlyHumidityForecast(targetDateStr = null) {
     const todayStr = getLocalDateString().replace(/-/g, '');
     const dateToFetch = targetDateStr ? targetDateStr.replace(/-/g, '') : todayStr;
 
+    // [비용 최적화] 오늘 날짜의 24시간 데이터가 이미 Firebase에 있는지 먼저 확인
+    if (dateToFetch === todayStr && typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+        try {
+            const snapshot = await firebase.database().ref(`hourlyForecasts/${targetDateStr || getLocalDateString()}`).once('value');
+            const existing = snapshot.val();
+            // 데이터가 이미 24시간 분량이 다 채워져 있다면 API를 호출하지 않음 (비용 절감)
+            if (existing && existing.data && existing.data.length >= 24) {
+                console.log(`✅ [비용절감] ${dateToFetch}의 24시간 데이터가 이미 존재하여 API 호출을 생략합니다.`);
+                return existing.data;
+            }
+        } catch (e) {
+            console.warn('Firebase 기존 데이터 확인 실패:', e);
+        }
+    }
+
     // 만약 요청한 날짜가 오늘이 아니라면 Firebase에서 데이터를 찾아봅니다.
     if (dateToFetch !== todayStr) {
         return await loadHistoricalHourlyHumidity(targetDateStr);
@@ -2252,17 +2268,22 @@ function displayHourlyHumidity(data, targetDateStr = null) {
  * 주간 예측 화면에서 시간별 습도 예보를 업데이트합니다.
  */
 async function updateHourlyHumidity(targetDate = null) {
-    const grid = document.getElementById('hourly-humidity-grid');
-    const dateInput = document.getElementById('hourly-forecast-date');
-    if (!grid) return;
-
     const todayStr = getLocalDateString();
-    const dateToLoad = targetDate || (dateInput ? dateInput.value : todayStr) || todayStr;
+    const dateToLoad = targetDate || todayStr;
+    const grid = document.getElementById('hourly-humidity-grid');
 
-    grid.innerHTML = '<div class="hourly-loading">데이터를 불러오는 중...</div>';
+    // UI 로딩 표시 (그리드가 있을 때만)
+    if (grid) {
+        grid.innerHTML = '<div class="hourly-loading">데이터를 불러오는 중...</div>';
+    }
 
+    // 1. 데이터 가져오기 및 저장 (이 함수 내부에서 Firebase 저장을 수행함)
     const data = await fetchHourlyHumidityForecast(dateToLoad);
-    displayHourlyHumidity(data, dateToLoad);
+
+    // 2. UI 업데이트 (그리드가 있을 때만)
+    if (grid) {
+        displayHourlyHumidity(data, dateToLoad);
+    }
 }
 
 
