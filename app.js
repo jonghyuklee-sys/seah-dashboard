@@ -691,6 +691,7 @@ async function updateWeatherData() {
 
         // [추가] 실황 습도 데이터를 시간별 습도 기록(hourlyForecasts)에 실시간으로 반영
         if (currentHum > 0 && typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+            // [수정] 저장은 동절기만 수행 (11월~3월)
             const currentMonth = now.getMonth();
             const isWinterSeason = currentMonth >= 10 || currentMonth <= 2;
 
@@ -1501,8 +1502,10 @@ function init() {
             if (val) {
                 console.log('Firebase에서 단기예보 API 키를 성공적으로 로드했습니다.');
                 kmaShortApiKey = val;
-                // 키가 업데이트되면 날씨 정보 다시 불러오기
+                // 키가 업데이트되면 모든 날씨 관련 정보 다시 불러오기
                 updateWeatherData();
+                updateWeeklyForecast();
+                updateHourlyHumidity();
             } else {
                 console.warn('Firebase에 단기예보 API 키가 설정되지 않았습니다. settings/kma_short_api_key 경로에 키를 추가해주세요.');
             }
@@ -1513,6 +1516,7 @@ function init() {
             if (val) {
                 console.log('Firebase에서 중기예보 API 키를 성공적으로 로드했습니다.');
                 kmaMidApiKey = val;
+                updateWeeklyForecast(); // 중기예보 키 로드 시 주간 예보 갱신
             } else {
                 console.warn('Firebase에 중기예보 API 키가 설정되지 않았습니다. settings/kma_mid_api_key 경로에 키를 추가해주세요.');
             }
@@ -2102,134 +2106,118 @@ async function fetchHourlyHumidityForecast(targetDateStr = null) {
     const API_KEY = kmaShortApiKey;
     const nx = 56, ny = 92;
     const todayStr = getLocalDateString().replace(/-/g, '');
-    const dateToFetch = targetDateStr ? targetDateStr.replace(/-/g, '') : todayStr;
+    const dateToSearch = targetDateStr ? targetDateStr.replace(/-/g, '') : todayStr;
+    const isToday = (dateToSearch === todayStr);
 
-    // [비용 최적화] 요청한 날짜가 오늘이고, 이미 24시간 데이터가 Firebase에 있다면 API 호출 생략
-    if (dateToFetch === todayStr && typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+    // 1. Firebase에서 해당 날짜의 기존 데이터 로드 (실측 데이터 병합 및 폴백용)
+    let existingData = [];
+    if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
         try {
-            const snapshot = await firebase.database().ref(`hourlyForecasts/${getLocalDateString()}`).once('value');
-            const existing = snapshot.val();
-            if (existing && existing.data && existing.data.length >= 24) {
-                console.log(`✅ [비용절감] ${dateToFetch}의 24시간 데이터가 이미 존재하여 API 호출을 생략합니다.`);
-                return existing.data;
-            }
-        } catch (e) {
-            console.warn('Firebase 기존 데이터 확인 실패:', e);
-        }
-    }
-
-    // 만약 요청한 날짜가 오늘이 아니라면 Firebase에서 데이터를 찾아보고 종료
-    if (dateToFetch !== todayStr) {
-        return await loadHistoricalHourlyHumidity(targetDateStr);
-    }
-
-    if (!API_KEY || API_KEY.length < 10) {
-        console.warn('시간별 습도 예보: API 키 미설정');
-        return null;
-    }
-
-    try {
-        const now = new Date();
-        const baseTimes = [23, 20, 17, 14, 11, 8, 5, 2];
-        let fcstBaseTime = 2, fcstBaseDate = todayStr;
-
-        if (now.getHours() < 2 || (now.getHours() === 2 && now.getMinutes() < 15)) {
-            const yesterday = new Date(now);
-            yesterday.setDate(now.getDate() - 1);
-            fcstBaseDate = getLocalDateString(yesterday).replace(/-/g, '');
-            fcstBaseTime = 23;
-        } else {
-            for (const t of baseTimes) {
-                if (now.getHours() > t || (now.getHours() === t && now.getMinutes() > 15)) {
-                    fcstBaseTime = t;
-                    break;
+            const pathDate = targetDateStr || getLocalDateString();
+            const snap = await firebase.database().ref(`hourlyForecasts/${pathDate}`).once('value');
+            const val = snap.val();
+            if (val && val.data) {
+                existingData = val.data;
+                // 이미 24시간 데이터가 꽉 차있고 오늘이 아니거나 충분히 최신이면 반환 (비용 절감)
+                if (existingData.length >= 24 && (!isToday || (Date.now() - (val.updatedAt || 0) < 3600000))) {
+                    console.log(`✅ [캐시/저장소] ${pathDate} 데이터를 사용합니다.`);
+                    return existingData;
                 }
             }
+        } catch (e) {
+            console.warn('Firebase 데이터 로드 실패:', e);
         }
+    }
 
-        const serviceKey = encodeURIComponent(API_KEY);
-        const baseUrl = 'https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0';
-        const fcstUrl = `${baseUrl}/getVilageFcst?serviceKey=${serviceKey}&dataType=JSON&base_date=${fcstBaseDate}&base_time=${String(fcstBaseTime).padStart(2, '0')}00&nx=${nx}&ny=${ny}&numOfRows=1000`;
+    // 2. 오늘 데이터거나 데이터가 부족한 경우 API 호출 시도
+    if (API_KEY && API_KEY.length >= 10 && (isToday || existingData.length < 5)) {
+        try {
+            const now = new Date();
+            const baseTimes = [23, 20, 17, 14, 11, 8, 5, 2];
+            let fcstBaseTime = 2, fcstBaseDate = todayStr;
 
-        const fcstRes = await requestKma(fcstUrl);
-
-        if (fcstRes?.response?.header?.resultCode === '00') {
-            const items = fcstRes.response.body.items.item;
-            const rehItems = items.filter(i => i.category === 'REH');
-
-            // 날짜별로 데이터 그룹화
-            const dataByDate = {};
-            rehItems.forEach(item => {
-                if (!dataByDate[item.fcstDate]) dataByDate[item.fcstDate] = [];
-                dataByDate[item.fcstDate].push({
-                    time: item.fcstTime.substring(0, 2) + ':' + item.fcstTime.substring(2),
-                    humidity: parseInt(item.fcstValue)
-                });
-            });
-
-            const targetHours = [
-                '00:00', '01:00', '02:00', '03:00', '04:00', '05:00',
-                '06:00', '07:00', '08:00', '09:00', '10:00', '11:00',
-                '12:00', '13:00', '14:00', '15:00', '16:00', '17:00',
-                '18:00', '19:00', '20:00', '21:00', '22:00', '23:00'
-            ];
-
-            // 각 날짜별로 Firebase에 병합 저장
-            for (const dateStr of Object.keys(dataByDate)) {
-                const year = parseInt(dateStr.substring(0, 4));
-                const month = parseInt(dateStr.substring(4, 6)) - 1; // 0-based
-                const day = parseInt(dateStr.substring(6, 8));
-                const forecastDate = new Date(year, month, day);
-                const forecastMonth = forecastDate.getMonth();
-
-                // 동절기 여부 확인 (11월~3월: 10, 11, 0, 1, 2)
-                const isWinterSeason = forecastMonth >= 10 || forecastMonth <= 2;
-
-                if (isWinterSeason && typeof firebase !== 'undefined' && firebase.apps.length > 0) {
-                    const formattedDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                    const ref = firebase.database().ref(`hourlyForecasts/${formattedDate}`);
-
-                    // 기존 데이터 가져오기
-                    const snapshot = await ref.once('value');
-                    const existing = snapshot.val() || { data: [] };
-                    const existingData = existing.data || [];
-
-                    // 새로운 데이터 매핑
-                    const newData = dataByDate[dateStr];
-
-                    // 병합 로직: 24시간 슬롯을 기준으로 채움
-                    const mergedHourlyData = targetHours.map(hourStr => {
-                        const newMatch = newData.find(d => d.time === hourStr);
-                        if (newMatch) return newMatch;
-
-                        const existingMatch = existingData.find(d => d.time === hourStr);
-                        if (existingMatch) return existingMatch;
-
-                        return null;
-                    }).filter(d => d !== null);
-
-                    if (mergedHourlyData.length > 0) {
-                        await ref.set({
-                            data: mergedHourlyData,
-                            updatedAt: Date.now()
-                        });
-                        console.log(`💾 시간별 습도 예보 병합 완료 (${formattedDate}, ${mergedHourlyData.length}개 슬롯)`);
+            if (now.getHours() < 2 || (now.getHours() === 2 && now.getMinutes() < 15)) {
+                const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+                fcstBaseDate = getLocalDateString(yesterday).replace(/-/g, '');
+                fcstBaseTime = 23;
+            } else {
+                for (const t of baseTimes) {
+                    if (now.getHours() > t || (now.getHours() === t && now.getMinutes() > 15)) {
+                        fcstBaseTime = t; break;
                     }
                 }
             }
 
-            // 요청한 날짜의 최종 데이터 반환 (현재 병합된 최신 결과)
-            if (dataByDate[todayStr]) {
-                const snapshot = await firebase.database().ref(`hourlyForecasts/${getLocalDateString()}`).once('value');
-                const val = snapshot.val();
-                return val ? val.data : null;
+            const encodedShortKey = encodeURIComponent(API_KEY);
+            const baseUrl = 'https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst';
+            const getParams = (bt) => `dataType=JSON&base_date=${fcstBaseDate}&base_time=${bt}&nx=${nx}&ny=${ny}&numOfRows=1000`;
+
+            console.log(`🌐 시간별 습도 API 호출 시도 (${fcstBaseDate}, ${fcstBaseTime}시 기준)...`);
+            const fcstRes = await fetchWithBaseTimeSearch(baseUrl, getParams, fcstBaseTime, encodedShortKey);
+
+            if (fcstRes?.response?.header?.resultCode === '00') {
+                const items = fcstRes.response.body.items.item.filter(i => i.category === 'REH');
+
+                // 날짜별로 데이터 분류
+                const apiDataByDate = {};
+                items.forEach(item => {
+                    if (!apiDataByDate[item.fcstDate]) apiDataByDate[item.fcstDate] = [];
+                    apiDataByDate[item.fcstDate].push({
+                        time: item.fcstTime.substring(0, 2) + ':' + item.fcstTime.substring(2),
+                        humidity: parseInt(item.fcstValue)
+                    });
+                });
+
+                const targetHours = [
+                    '00:00', '01:00', '02:00', '03:00', '04:00', '05:00',
+                    '06:00', '07:00', '08:00', '09:00', '10:00', '11:00',
+                    '12:00', '13:00', '14:00', '15:00', '16:00', '17:00',
+                    '18:00', '19:00', '20:00', '21:00', '22:00', '23:00'
+                ];
+
+                // 현재 요청한 날자와 API 응답 날짜들에 대해 병합 처리
+                let requestedResult = null;
+
+                for (const dateRaw of Object.keys(apiDataByDate)) {
+                    const formattedDate = `${dateRaw.substring(0, 4)}-${dateRaw.substring(4, 6)}-${dateRaw.substring(6, 8)}`;
+                    const apiData = apiDataByDate[dateRaw];
+
+                    // 해당 날짜의 기존 데이터 (오늘 외의 날짜는 새로 로드해야 할 수도 있지만, 성능상 오늘 위주로 처리)
+                    let baseDataForMerge = (formattedDate === (targetDateStr || getLocalDateString())) ? existingData : [];
+
+                    const mergedData = targetHours.map(hourStr => {
+                        const existingMatch = baseDataForMerge.find(d => d.time === hourStr);
+                        const apiMatch = apiData.find(d => d.time === hourStr);
+
+                        if (existingMatch && existingMatch.isObserved) return existingMatch;
+                        if (apiMatch) return apiMatch;
+                        return existingMatch || null;
+                    }).filter(d => d !== null);
+
+                    if (formattedDate === dateToSearch || dateRaw === dateToSearch) {
+                        requestedResult = mergedData;
+                    }
+
+                    // 저장은 동절기만 수행
+                    const month = parseInt(dateRaw.substring(4, 6));
+                    const isWinter = (month >= 11 || month <= 3);
+                    if (isWinter && typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+                        firebase.database().ref(`hourlyForecasts/${formattedDate}`).set({
+                            data: mergedData,
+                            updatedAt: Date.now()
+                        });
+                    }
+                }
+
+                if (requestedResult) return requestedResult;
             }
+        } catch (e) {
+            console.error('시간별 습도 API 처리 실패:', e);
         }
-        return null;
-    } catch (e) {
-        console.error('시간별 습도 예보 에러:', e);
-        return null;
     }
+
+    // 3. 최종적으로 데이터가 있으면 반환, 없으면 null
+    return existingData.length > 0 ? existingData : null;
 }
 
 /**
@@ -2307,10 +2295,13 @@ function displayHourlyHumidity(data, targetDateStr = null) {
             const currentStyle = isCurrent ? 'border: 2px solid var(--seah-blue); box-shadow: 0 0 15px rgba(0,94,184,0.4); background: rgba(255,255,255,0.9); z-index: 2;' : '';
             const pastStyle = isPast ? 'opacity: 0.4; pointer-events: none;' : '';
 
+            const observedTag = item.isObserved ? '<span class="obs-tag">● 실측</span>' : '';
+
             return `
-                <div class="hourly-humidity-item ${humClass}" style="${currentStyle}${pastStyle}" title="${item.time} 습도: ${item.humidity}%">
+                <div class="hourly-humidity-item ${humClass}" style="${currentStyle}${pastStyle}" title="${item.time} 습도: ${item.humidity}% ${item.isObserved ? '(실측 데이터)' : '(기상청 예보)'}">
                     <span class="hourly-time">${item.time.substring(0, 2)}시</span>
                     <span class="hourly-value">${item.humidity}%</span>
+                    ${observedTag}
                 </div>
             `;
         }).join('');
