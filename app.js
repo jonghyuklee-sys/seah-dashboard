@@ -701,20 +701,30 @@ async function updateWeatherData() {
                 const ref = firebase.database().ref(`hourlyForecasts/${dateStr}`);
 
                 try {
+                    // 트랜잭션 또는 최신 데이터 수신 후 업데이트 방식을 사용하여 데이터 유실 방지
                     const snapshot = await ref.once('value');
                     const existing = snapshot.val() || { data: [] };
-                    const existingData = existing.data || [];
+                    let existingData = existing.data || [];
 
-                    // 현재 시간 데이터가 이미 있는지 확인하여 업데이트 또는 추가
+                    // 1시간 단위로 정규화된 24시간 틀 유지
+                    const targetHours = [
+                        '00:00', '01:00', '02:00', '03:00', '04:00', '05:00',
+                        '06:00', '07:00', '08:00', '09:00', '10:00', '11:00',
+                        '12:00', '13:00', '14:00', '15:00', '16:00', '17:00',
+                        '18:00', '19:00', '20:00', '21:00', '22:00', '23:00'
+                    ];
+
                     let updated = false;
-                    const newData = existingData.map(d => {
-                        if (d.time === hourStr) {
+                    const newData = targetHours.map(h => {
+                        const match = existingData.find(d => d.time === h);
+                        if (h === hourStr) {
                             updated = true;
-                            return { time: hourStr, humidity: Math.round(currentHum), isObserved: true };
+                            return { time: h, humidity: Math.round(currentHum), isObserved: true };
                         }
-                        return d;
-                    });
+                        return match || null;
+                    }).filter(d => d !== null);
 
+                    // 누락된 데이터가 있었을 경우를 위해 다시 한번 체크
                     if (!updated) {
                         newData.push({ time: hourStr, humidity: Math.round(currentHum), isObserved: true });
                         newData.sort((a, b) => a.time.localeCompare(b.time));
@@ -723,9 +733,10 @@ async function updateWeatherData() {
                     await ref.set({
                         data: newData,
                         updatedAt: Date.now(),
-                        lastObservedTime: hourStr
+                        lastObservedTime: hourStr,
+                        isWinter: true
                     });
-                    console.log(`📡 실황 습도(${currentHum}%)를 시간별 기록(${hourStr})에 반영했습니다.`);
+                    console.log(`📡 실황 습도(${currentHum}%)를 기록(${hourStr})했습니다.`);
                 } catch (e) {
                     console.warn('실황 습도 Firebase 저장 실패:', e);
                 }
@@ -2182,19 +2193,32 @@ async function fetchHourlyHumidityForecast(targetDateStr = null) {
                     const formattedDate = `${dateRaw.substring(0, 4)}-${dateRaw.substring(4, 6)}-${dateRaw.substring(6, 8)}`;
                     const apiData = apiDataByDate[dateRaw];
 
-                    // 해당 날짜의 기존 데이터 (오늘 외의 날짜는 새로 로드해야 할 수도 있지만, 성능상 오늘 위주로 처리)
-                    let baseDataForMerge = (formattedDate === (targetDateStr || getLocalDateString())) ? existingData : [];
+                    // 해당 날짜의 기존 데이터를 Firebase에서 확인
+                    let baseDataForMerge = [];
+                    if (formattedDate === (targetDateStr || getLocalDateString())) {
+                        baseDataForMerge = existingData;
+                    } else if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+                        try {
+                            const dateSnap = await firebase.database().ref(`hourlyForecasts/${formattedDate}`).once('value');
+                            const dateVal = dateSnap.val();
+                            if (dateVal && dateVal.data) baseDataForMerge = dateVal.data;
+                        } catch (e) { console.warn(`${formattedDate} 데이터 로드 실패`); }
+                    }
 
                     const mergedData = targetHours.map(hourStr => {
                         const existingMatch = baseDataForMerge.find(d => d.time === hourStr);
                         const apiMatch = apiData.find(d => d.time === hourStr);
 
+                        // 1. 실측 데이터가 있으면 무조건 보존
                         if (existingMatch && existingMatch.isObserved) return existingMatch;
+                        // 2. 새로운 API 예보 데이터가 있으면 업데이트 (미래 시간)
                         if (apiMatch) return apiMatch;
+                        // 3. 기존 데이터(과거 예보 등)가 있다면 유지
                         return existingMatch || null;
                     }).filter(d => d !== null);
 
-                    if (formattedDate === dateToSearch || dateRaw === dateToSearch) {
+                    // 현재 조회 중인 날짜인 경우 결과에 담기
+                    if (dateRaw === dateToSearch) {
                         requestedResult = mergedData;
                     }
 
@@ -2202,9 +2226,10 @@ async function fetchHourlyHumidityForecast(targetDateStr = null) {
                     const month = parseInt(dateRaw.substring(4, 6));
                     const isWinter = (month >= 11 || month <= 3);
                     if (isWinter && typeof firebase !== 'undefined' && firebase.apps.length > 0) {
-                        firebase.database().ref(`hourlyForecasts/${formattedDate}`).set({
+                        firebase.database().ref(`hourlyForecasts/${formattedDate}`).update({
                             data: mergedData,
-                            updatedAt: Date.now()
+                            updatedAt: Date.now(),
+                            isWinter: true
                         });
                     }
                 }
@@ -2217,7 +2242,7 @@ async function fetchHourlyHumidityForecast(targetDateStr = null) {
     }
 
     // 3. 최종적으로 데이터가 있으면 반환, 없으면 null
-    return existingData.length > 0 ? existingData : null;
+    return (existingData && existingData.length > 0) ? existingData : null;
 }
 
 /**
