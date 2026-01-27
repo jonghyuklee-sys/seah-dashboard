@@ -691,9 +691,9 @@ async function updateWeatherData() {
 
         // [추가] 실황 습도 데이터를 시간별 습도 기록(hourlyForecasts)에 실시간으로 반영
         if (currentHum > 0 && typeof firebase !== 'undefined' && firebase.apps.length > 0) {
-            // [수정] 저장은 동절기만 수행 (11월~3월)
+            // [수정] 저장은 다시 동절기(11월~3월)만 수행하도록 복구
             const currentMonth = now.getMonth();
-            const isWinterSeason = currentMonth >= 10 || currentMonth <= 2;
+            const isWinterSeason = currentMonth >= 10 || currentMonth <= 2; // 11월(10) ~ 3월(2)
 
             if (isWinterSeason) {
                 const dateStr = getLocalDateString();
@@ -701,7 +701,7 @@ async function updateWeatherData() {
                 const ref = firebase.database().ref(`hourlyForecasts/${dateStr}`);
 
                 try {
-                    // 트랜잭션 또는 최신 데이터 수신 후 업데이트 방식을 사용하여 데이터 유실 방지
+                    // 트랜잭션과 유사하게 최신 데이터를 가져와서 병합
                     const snapshot = await ref.once('value');
                     const existing = snapshot.val() || { data: [] };
                     let existingData = existing.data || [];
@@ -714,32 +714,32 @@ async function updateWeatherData() {
                         '18:00', '19:00', '20:00', '21:00', '22:00', '23:00'
                     ];
 
-                    let updated = false;
+                    let isUpdated = false;
                     const newData = targetHours.map(h => {
-                        const match = existingData.find(d => d.time === h);
                         if (h === hourStr) {
-                            updated = true;
+                            isUpdated = true;
                             return { time: h, humidity: Math.round(currentHum), isObserved: true };
                         }
+                        const match = existingData.find(d => d.time === h);
                         return match || null;
                     }).filter(d => d !== null);
 
-                    // 누락된 데이터가 있었을 경우를 위해 다시 한번 체크
-                    if (!updated) {
+                    if (newData.length === 0 && isUpdated) {
                         newData.push({ time: hourStr, humidity: Math.round(currentHum), isObserved: true });
-                        newData.sort((a, b) => a.time.localeCompare(b.time));
                     }
 
-                    await ref.set({
+                    await ref.update({
                         data: newData,
                         updatedAt: Date.now(),
                         lastObservedTime: hourStr,
                         isWinter: true
                     });
-                    console.log(`📡 실황 습도(${currentHum}%)를 기록(${hourStr})했습니다.`);
+                    console.log(`📡 동절기 실황 습도(${currentHum}%)를 기록(${hourStr})했습니다.`);
                 } catch (e) {
                     console.warn('실황 습도 Firebase 저장 실패:', e);
                 }
+            } else {
+                console.log('☀️ 현재는 하절기(4월~10월)이므로 습도 데이터를 저장하지 않습니다.');
             }
         }
 
@@ -2222,7 +2222,7 @@ async function fetchHourlyHumidityForecast(targetDateStr = null) {
                         requestedResult = mergedData;
                     }
 
-                    // 저장은 동절기만 수행
+                    // 저장은 다시 동절기(11월~3월)만 수행하도록 복구
                     const month = parseInt(dateRaw.substring(4, 6));
                     const isWinter = (month >= 11 || month <= 3);
                     if (isWinter && typeof firebase !== 'undefined' && firebase.apps.length > 0) {
