@@ -2117,12 +2117,11 @@ function displayWeeklyForecast(forecast) {
         let finalScore = aiDay ? aiDay.score : 0;
         let finalReason = aiDay ? aiDay.reason : (day.reason || '');
 
-        if (!aiDay && day.risk !== '안전') {
-            // 과거 이력 매칭이 아니더라도 위험 등급에 따라 세분화된 AI 점수 산출
+        if (!aiDay) {
             if (day.risk === '위험') {
-                // 이력 매칭 문구 포함 시에만 95% 일치로 간주하여 95점 이상 부여 (위험)
+                // 이력 매칭 문구 포함 시에만 95% 일치로 간주하여 95~99점 부여 (위험)
                 if (finalReason.includes('과거 유사 사례')) {
-                    finalScore = 95 + Math.floor(Math.random() * 6);
+                    finalScore = 95 + Math.floor(Math.random() * 5); // 최대 99점
                 } else {
                     // 그 외 물리적 기상 위험(기온급변 등)은 '경고' 구간(60~79점)으로 배정
                     finalScore = 65 + Math.floor(Math.random() * 14);
@@ -2134,6 +2133,9 @@ function displayWeeklyForecast(forecast) {
                 } else {
                     finalScore = 30 + Math.floor(Math.random() * 30);
                 }
+            } else {
+                // [추가] 안전 단계에서도 0 ~ 30점 사이의 점수 표시
+                finalScore = 5 + Math.floor(Math.random() * 20);
             }
         }
 

@@ -327,8 +327,10 @@
         <section class="forecast-container">
             <div class="forecast-header">
                 <div>
-                    <h2>차주 결로 발생 예측 (7일 예보)</h2>
-                    <p class="text-muted">기상청 단기/중기 예보 및 군산 세아씨엠 지역 데이터를 기반으로 한 예측입니다.</p>
+                    <h2>주간 결로 발생 예측 (7일 예보)</h2>
+                    <p class="text-muted">기상청 단기/중기 예보 및 군산 세아씨엠 지역 데이터를 기반으로 한 예측입니다. <span
+                            style="color: #d93025; font-size: 0.85rem; font-weight: 600;">(D+5일부터는 습도 예측 데이터가 없어 정확도가 낮을
+                            수 있습니다.)</span></p>
                 </div>
                 <button onclick="refreshWeeklyForecast()" class="btn-refresh" title="최신 데이터 새로고침">
                     🔄 새로고침
@@ -399,7 +401,12 @@
                         <span style="font-size: 1.2rem;">💡</span>
                         <div style="font-size: 0.82rem; color: #555; line-height: 1.4;">
                             <strong>분석 방식:</strong> 단순 기상 데이터뿐만 아니라 시스템에 저장된 <strong>과거 실제 결로 이력 패턴을 딥러닝 방식</strong>으로
-                            비교 분석합니다. 결로 이력을 많이 등록할수록 예측 정확도는 실시간으로 계속 향상됩니다.
+                            비교 분석합니다. 결로 이력을 많이 등록할수록 예측 정확도는 실시간으로 계속 향상됩니다.<br>
+                            <span
+                                style="color: #666; font-size: 0.75rem; margin-top: 4px; display: block; border-top: 1px solid #eee; padding-top: 4px;">
+                                ※ AI 점수는 기상청 예보 및 과거 통계를 기반으로 한 <strong>위험도 지수</strong>이며, 실제 현장 상태에 따라 결로가 발생하지 않을 수
+                                있습니다.
+                            </span>
                         </div>
                     </div>
                 </div>
