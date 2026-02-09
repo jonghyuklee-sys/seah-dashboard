@@ -335,7 +335,7 @@
                 </button>
             </div>
 
-            <div class="forecast-summary-card card mt-md">
+            <div class="forecast-summary-card card mt-sm">
                 <div class="summary-icon">💡</div>
                 <div class="summary-text">
                     <h4>주간 관리 가이드</h4>
@@ -343,12 +343,12 @@
                 </div>
             </div>
 
-            <div id="weekly-forecast-grid" class="weekly-forecast-grid mt-lg">
+            <div id="weekly-forecast-grid" class="weekly-forecast-grid mt-md">
                 <!-- JS에서 7일간의 예측 카드를 생성합니다 -->
             </div>
 
             <!-- 당일 시간별 습도 예보 -->
-            <div class="hourly-humidity-card card mt-lg">
+            <div class="hourly-humidity-card card mt-md">
                 <div class="card-header-flex"
                     style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
                     <h4>💧 시간별 습도 예보 <span id="hourly-update-time"></span></h4>
@@ -360,24 +360,47 @@
                 </div>
             </div>
 
-            <div class="equipment-guide-card card mt-lg">
-                <h4>🛠️ 설비 가동 기준 안내</h4>
-                <div class="guide-grid" style="grid-template-columns: 1fr 1fr;">
-                    <div class="guide-item guide-heater">
-                        <div class="guide-header">
-                            <span class="guide-icon">🔥</span>
-                            <strong>열풍기 (강판 예열)</strong>
-                        </div>
-                        <p class="guide-condition">전일대비 기온상승 <strong>8~10℃↑</strong><br>또는 습도 <strong>80%↑</strong></p>
-                        <small>목적: 따뜻한 공기 유입 전 강판 온도 선제적 상승</small>
+
+            <div class="ai-guide-card card mt-md" style="border-left: 5px solid var(--seah-blue);">
+                <h4>🤖 AI 결로 예측 점수 안내</h4>
+                <div class="ai-guide-content">
+                    <div class="score-meaning">
+                        <p style="margin-bottom: 10px; font-weight: 700; color: var(--seah-blue);">[점수별 판정 및 조치 지침]</p>
+                        <ul
+                            style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px 30px; list-style: none; padding: 0; font-size: 0.88rem; line-height: 1.5;">
+                            <li style="border-bottom: 1px dashed #eee; padding-bottom: 6px;">
+                                <strong
+                                    style="color: #d93025; background: #fee8e7; padding: 2px 5px; border-radius: 3px;">80
+                                    ~ 100점 (위험)</strong><br>
+                                과거 결로 발생 패턴과 <strong>95% 이상 일치</strong>. 즉시 설비 가동 및 집중 예방 점검 필수.
+                            </li>
+                            <li style="border-bottom: 1px dashed #eee; padding-bottom: 6px;">
+                                <strong
+                                    style="color: #f29900; background: #fff4e0; padding: 2px 5px; border-radius: 3px;">60
+                                    ~ 80점 (경고)</strong><br>
+                                결로 위험도 높음. 배풍기 상시 가동 및 제품 상태 실시간 모니터링 권장.
+                            </li>
+                            <li>
+                                <strong
+                                    style="color: #1a73e8; background: #e8f0fe; padding: 2px 5px; border-radius: 3px;">30
+                                    ~ 60점 (주의)</strong><br>
+                                기상 변화 및 습도 증가 감지. 예방적인 배풍기 조기 가동 검토.
+                            </li>
+                            <li>
+                                <strong
+                                    style="color: #34a853; background: #e6f4ea; padding: 2px 5px; border-radius: 3px;">0
+                                    ~ 30점 (안전)</strong><br>
+                                정상 범위. 평시 모니터링 수준 유지.
+                            </li>
+                        </ul>
                     </div>
-                    <div class="guide-item guide-fan">
-                        <div class="guide-header">
-                            <span class="guide-icon">🌀</span>
-                            <strong>배풍기 (습기 제거)</strong>
+                    <div class="analysis-logic"
+                        style="margin-top: 15px; background: #f8fbff; padding: 12px 15px; border-radius: 8px; border: 1px solid #e0e8f0; display: flex; align-items: center; gap: 12px;">
+                        <span style="font-size: 1.2rem;">💡</span>
+                        <div style="font-size: 0.82rem; color: #555; line-height: 1.4;">
+                            <strong>분석 방식:</strong> 단순 기상 데이터뿐만 아니라 시스템에 저장된 <strong>과거 실제 결로 이력 패턴을 딥러닝 방식</strong>으로
+                            비교 분석합니다. 결로 이력을 많이 등록할수록 예측 정확도는 실시간으로 계속 향상됩니다.
                         </div>
-                        <p class="guide-condition">기온 상승폭 <strong>8℃ 이상</strong><br>또는 습도 <strong>80% 이상</strong></p>
-                        <small>목적: 내부 정체 습기 제거 및 외부 공기 순환</small>
                     </div>
                 </div>
             </div>

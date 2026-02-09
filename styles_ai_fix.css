@@ -1,0 +1,46 @@
+@media (max-width: 480px) {
+    .hourly-section-items {
+        grid-template-columns: repeat(3, 1fr) !important;
+    }
+}
+
+/* AI 예측 관련 스타일 - 최종 고정 */
+.ai-risk-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: #005eb8 !important;
+    /* 세아 블루로 직접 지정 */
+    border-radius: 6px;
+    padding: 3px 8px;
+    border: 1px solid #ffffff;
+    z-index: 100 !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.ai-label {
+    font-size: 0.6rem !important;
+    color: #ffffff !important;
+    font-weight: 900 !important;
+    line-height: 1;
+    margin-bottom: 2px;
+}
+
+.ai-score {
+    font-size: 0.9rem !important;
+    color: #ffffff !important;
+    font-weight: 900 !important;
+}
+
+.ai-intensive {
+    border: 3px solid #005eb8 !important;
+    background: #f8fbff !important;
+    box-shadow: 0 4px 15px rgba(0, 94, 184, 0.2) !important;
+}
+
+.forecast-day-card {
+    position: relative !important;
+}

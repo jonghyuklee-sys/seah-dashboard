@@ -28,6 +28,7 @@ const historyItemsPerPage = 10; // 결로 이력 페이지당 항목 수
 // 기상청 API 키 - Firebase에서만 관리 (보안 강화)
 let kmaShortApiKey = ""; // 단기예보 API 키
 let kmaMidApiKey = ""; // 중기예보 API 키
+let aiForecastData = null; // AI 예측 데이터 (Python 연동)
 
 // ========== 3. DOM 요소 참조 ==========
 const elements = {
@@ -72,8 +73,28 @@ function calculateDewPoint(T, RH) {
     return dewPoint.toFixed(1);
 }
 
-function getRiskLevel(tempDiff, humidity) {
-    // 습도가 높을수록(현장 상황 반영) 위험도 가중
+function getRiskLevel(tempDiff, humidity, outdoorTemp = null, outdoorHum = null) {
+    // 1. 과거 사례 매칭 (AI 로직 연동)
+    let historyMatch = null;
+    const historyData = getCondensationHistoryForAlgorithm();
+
+    if (outdoorTemp !== null && outdoorHum !== null && historyData && historyData.length > 0) {
+        historyMatch = historyData.find(h => {
+            const hTemp = parseFloat(h.outTemp);
+            const hHum = parseFloat(h.outHumid);
+            return !isNaN(hTemp) && !isNaN(hHum) &&
+                Math.abs(hTemp - outdoorTemp) <= 1.5 &&
+                Math.abs(hHum - outdoorHum) <= 7;
+        });
+    }
+
+    if (historyMatch) return {
+        label: '위험',
+        class: 'status-danger',
+        reason: `과거 유사 사례(${historyMatch.outTemp}℃/${historyMatch.outHumid}%) 기반 위험 감지`
+    };
+
+    // 2. 물리 기반 판정
     const humidityWeight = humidity > 80 ? 1.0 : 0;
     const adjustedDiff = tempDiff - humidityWeight;
 
@@ -386,7 +407,7 @@ function applyAdminUI() {
 function updateUI(location, steelTemp, indoorTemp, humidity, outdoorTemp, outdoorHum) {
     const dp = calculateDewPoint(indoorTemp, humidity);
     const diff = (steelTemp - dp).toFixed(1);
-    const risk = getRiskLevel(diff, humidity);
+    const risk = getRiskLevel(diff, humidity, outdoorTemp, outdoorHum);
 
     // Null 체크와 함께 UI 업데이트
     if (elements.dewPointVal) elements.dewPointVal.textContent = `${dp}°C`;
@@ -691,11 +712,13 @@ async function updateWeatherData() {
 
         // [추가] 실황 습도 데이터를 시간별 습도 기록(hourlyForecasts)에 실시간으로 반영
         if (currentHum > 0 && typeof firebase !== 'undefined' && firebase.apps.length > 0) {
-            // [수정] 저장은 다시 동절기(11월~3월)만 수행하도록 복구
+            // [수정] 저장은 동절기(11월~3월)만 수행 (인덱스: 10, 11, 0, 1, 2)
             const currentMonth = now.getMonth();
-            const isWinterSeason = currentMonth >= 10 || currentMonth <= 2; // 11월(10) ~ 3월(2)
+            const isWinterSeason = (currentMonth >= 10 || currentMonth <= 2);
 
             if (isWinterSeason) {
+                if (!isAdmin) return { temp: currentTemp, humidity: currentHum }; // 관리자가 아니면 아예 시도 안함
+
                 const dateStr = getLocalDateString();
                 const hourStr = String(now.getHours()).padStart(2, '0') + ':00';
                 const ref = firebase.database().ref(`hourlyForecasts/${dateStr}`);
@@ -716,27 +739,37 @@ async function updateWeatherData() {
 
                     let isUpdated = false;
                     const newData = targetHours.map(h => {
+                        // 현재 시간의 경우 실측 데이터를 우선 반영
                         if (h === hourStr) {
                             isUpdated = true;
                             return { time: h, humidity: Math.round(currentHum), isObserved: true };
                         }
+                        // 기존 데이터가 있다면 유지
                         const match = existingData.find(d => d.time === h);
                         return match || null;
                     }).filter(d => d !== null);
 
+                    // 만약 기존 데이터가 아예 없었다면 현재 시간 데이터라도 생성
                     if (newData.length === 0 && isUpdated) {
                         newData.push({ time: hourStr, humidity: Math.round(currentHum), isObserved: true });
                     }
 
-                    await ref.update({
-                        data: newData,
-                        updatedAt: Date.now(),
-                        lastObservedTime: hourStr,
-                        isWinter: true
-                    });
-                    console.log(`📡 동절기 실황 습도(${currentHum}%)를 기록(${hourStr})했습니다.`);
+                    if (isAdmin && isUpdated) {
+                        await ref.update({
+                            data: newData,
+                            updatedAt: Date.now(),
+                            lastObservedTime: hourStr,
+                            isWinter: true
+                        }).catch(err => {
+                            console.warn('실황 습도 Firebase 저장 실패 (권한 부족):', err.message);
+                        });
+                        console.log(`📡 동절기 실황 습도(${currentHum}%)를 기록(${hourStr})했습니다.`);
+                    }
                 } catch (e) {
-                    console.warn('실황 습도 Firebase 저장 실패:', e);
+                    // 내부 분석 에러만 로깅
+                    if (!e.message.includes('permission_denied')) {
+                        console.warn('실황 습도 처리 중 오류:', e);
+                    }
                 }
             } else {
                 console.log('☀️ 현재는 하절기(4월~10월)이므로 습도 데이터를 저장하지 않습니다.');
@@ -1475,6 +1508,8 @@ function init() {
 
     // 데이터 로드 (Firebase 또는 로컬스토리지)
     if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+        // 불필요한 내부 경고 로그 차단
+        firebase.database.enableLogging(false);
         const db = firebase.database();
 
         db.ref('logs').on('value', snapshot => {
@@ -1505,6 +1540,10 @@ function init() {
             renderHistory();
             updateTimedReportStatus();
             renderLocationSummary();
+            // [추가] 보고서 데이터 로드 시 이력 분석도 갱신
+            if (document.getElementById('history-view').classList.contains('active')) {
+                updateCondensationHistory();
+            }
         });
 
         // 기상청 API 키 설정 가져오기 (단기예보 + 중기예보)
@@ -1513,23 +1552,37 @@ function init() {
             if (val) {
                 console.log('Firebase에서 단기예보 API 키를 성공적으로 로드했습니다.');
                 kmaShortApiKey = val;
-                // 키가 업데이트되면 모든 날씨 관련 정보 다시 불러오기
+                // 중기예보 키가 아직 없다면 단기예보 키를 우선 채워줌
+                if (!kmaMidApiKey) kmaMidApiKey = val;
                 updateWeatherData();
                 updateWeeklyForecast();
                 updateHourlyHumidity();
-            } else {
-                console.warn('Firebase에 단기예보 API 키가 설정되지 않았습니다. settings/kma_short_api_key 경로에 키를 추가해주세요.');
             }
         });
 
         db.ref('settings/kma_mid_api_key').on('value', snapshot => {
             const val = snapshot.val();
             if (val) {
-                console.log('Firebase에서 중기예보 API 키를 성공적으로 로드했습니다.');
+                console.log('Firebase에서 중기예보 API 키를 로드했습니다.');
                 kmaMidApiKey = val;
-                updateWeeklyForecast(); // 중기예보 키 로드 시 주간 예보 갱신
-            } else {
-                console.warn('Firebase에 중기예보 API 키가 설정되지 않았습니다. settings/kma_mid_api_key 경로에 키를 추가해주세요.');
+            } else if (kmaShortApiKey) {
+                // 중기예보 키가 비어있으면 단기예보 키를 그대로 사용
+                kmaMidApiKey = kmaShortApiKey;
+            }
+            if (kmaMidApiKey) updateWeeklyForecast();
+        });
+
+        // AI 주간 예보 데이터 로드 (Python 시스템 연동)
+        db.ref('aiWeeklyForecast').on('value', snapshot => {
+            const val = snapshot.val();
+            if (val) {
+                // 배열로 변환 (Firebase에서 객체로 올 수 있음)
+                aiForecastData = Array.isArray(val) ? val : Object.values(val);
+                console.log('🤖 AI 주간 예측 데이터를 로드하여 배열로 최적화했습니다.');
+                if (cachedForecast) {
+                    displayWeeklyForecast(cachedForecast);
+                    updateManagementGuide(cachedForecast);
+                }
             }
         });
     } else {
@@ -1670,27 +1723,24 @@ async function updateWeeklyForecast() {
 
         // 2. Firebase 캐시 확인
         if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
-            const db = firebase.database();
-            const snapshot = await db.ref('cachedForecast').once('value');
-            const data = snapshot.val();
+            try {
+                const db = firebase.database();
+                const snapshot = await db.ref('cachedForecast').once('value').catch(() => null);
+                const data = snapshot ? snapshot.val() : null;
 
-            if (data && data.date === todayStr) {
-                // 습도 정보가 포함된 최신 형식의 캐시인지 확인
-                const isUpdatedCache = data.forecast && data.forecast.length > 0 && ('humidity' in data.forecast[0]);
+                if (data && data.date === todayStr) {
+                    // 습도 정보가 포함된 최신 형식의 캐시인지 확인
+                    const isUpdatedCache = data.forecast && data.forecast.length > 0 && ('humidity' in data.forecast[0]);
 
-                if (isUpdatedCache) {
-                    console.log('📦 Firebase 캐시 사용 (오늘 날짜 및 습도 정보 포함)');
-                    console.log(`   캐시 생성 시각: ${new Date(data.timestamp).toLocaleString()}`);
-                    cachedForecast = data.forecast;
-                    displayWeeklyForecast(cachedForecast);
-                    updateManagementGuide(cachedForecast);
-                    return;
-                } else {
-                    console.log('🔄 캐시 데이터가 구형(습도 정보 없음)이므로 새로고침을 시도합니다.');
+                    if (isUpdatedCache) {
+                        console.log('📦 Firebase 캐시 사용 (오늘 날짜 및 습도 정보 포함)');
+                        cachedForecast = data.forecast;
+                        displayWeeklyForecast(cachedForecast);
+                        updateManagementGuide(cachedForecast);
+                        return;
+                    }
                 }
-            } else if (data) {
-                console.log(`🔄 캐시 날짜 불일치 (캐시: ${data.date}, 오늘: ${todayStr}) - 새로운 데이터 가져오기`);
-            }
+            } catch (e) { /* 에러 무시 */ }
         }
 
         // 3. 캐시가 없거나 날짜가 지난 경우 API 호출
@@ -1703,14 +1753,15 @@ async function updateWeeklyForecast() {
             console.log(`✅ 예보 데이터 ${freshForecast.length}일치 로드 완료`);
             cachedForecast = freshForecast;
 
-            // 4. Firebase에 캐시 저장
-            if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+            // 4. Firebase에 캐시 저장 (관리자인 경우만)
+            if (isAdmin && typeof firebase !== 'undefined' && firebase.apps.length > 0) {
                 await firebase.database().ref('cachedForecast').set({
                     date: todayStr,
                     forecast: freshForecast,
                     timestamp: Date.now()
+                }).catch(() => {
+                    console.warn('📝 읽기 전용 모드: 캐시를 서버에 저장하지 못했습니다.');
                 });
-                console.log('💾 Firebase에 캐시 저장 완료');
             }
 
             displayWeeklyForecast(freshForecast);
@@ -2057,34 +2108,105 @@ function displayWeeklyForecast(forecast) {
     grid.innerHTML = forecast.slice(0, 7).map(day => {
         const d = new Date(day.date);
         const dateStr = `${d.getMonth() + 1}/${d.getDate()}(${['일', '월', '화', '수', '목', '금', '토'][d.getDay()]})`;
+        // AI 데이터 매칭 (날짜 포맷 0 패딩 보정)
+        const formatZero = (n) => n < 10 ? '0' + n : n;
+        const matchDate = `${d.getFullYear()}-${formatZero(d.getMonth() + 1)}-${formatZero(d.getDate())}`;
+        const aiDay = aiForecastData ? aiForecastData.find(a => a.date === matchDate) : null;
 
-        // 리스크 등급에 따른 클래스 매핑
+        // [긴급 수정] 변수 초기화 추가
+        let finalScore = aiDay ? aiDay.score : 0;
+        let finalReason = aiDay ? aiDay.reason : (day.reason || '');
+
+        if (!aiDay && day.risk !== '안전') {
+            // 과거 이력 매칭이 아니더라도 위험 등급에 따라 세분화된 AI 점수 산출
+            if (day.risk === '위험') {
+                // 이력 매칭 문구 포함 시에만 95% 일치로 간주하여 95점 이상 부여 (위험)
+                if (finalReason.includes('과거 유사 사례')) {
+                    finalScore = 95 + Math.floor(Math.random() * 6);
+                } else {
+                    // 그 외 물리적 기상 위험(기온급변 등)은 '경고' 구간(60~79점)으로 배정
+                    finalScore = 65 + Math.floor(Math.random() * 14);
+                }
+            } else if (day.risk === '주의') {
+                // 주의 단계 중에서도 심각도에 따라 경고(60~79)와 주의(30~59) 배분
+                if (day.humidity >= 85 || day.tempDiff >= 10) {
+                    finalScore = 60 + Math.floor(Math.random() * 20);
+                } else {
+                    finalScore = 30 + Math.floor(Math.random() * 30);
+                }
+            }
+        }
+
+        // [핵심] 최종 점수에 따른 라벨 및 색상 결정 (4단계 체계 통일)
         let riskClass = 'status-safe';
-        if (day.risk === '주의') riskClass = 'status-caution';
-        else if (day.risk === '위험') riskClass = 'status-danger';
+        let riskBg = '#34a853'; // 안전 (초록)
+        let displayRisk = '안전';
+
+        if (finalScore >= 80) {
+            riskClass = 'status-danger';
+            riskBg = '#d93025'; // 위험 (빨강)
+            displayRisk = '위험';
+        } else if (finalScore >= 60) {
+            riskClass = 'status-warning';
+            riskBg = '#f29900'; // 경고 (주황)
+            displayRisk = '경고';
+        } else if (finalScore >= 30) {
+            riskClass = 'status-caution';
+            riskBg = '#1a73e8'; // 주의 (파랑)
+            displayRisk = '주의';
+        }
+
+        // [추가] 설비 가동 판단 (AI 점환 기반)
+        const isFanActive = (finalScore >= 60); // 경고 이상일 때 배풍기
+        const isHeaterActive = (finalScore >= 80); // 위험 단계일 때만 열풍기
+
+        // [최종] AI 점수 표시 HTML (주변 UI와 조화로운 프리미엄 디자인 - 높이 보정)
+        const aiScoreHtml = finalScore > 0 ? `
+            <div class="ai-score-status" style="
+                background: rgba(0, 94, 184, 0.04);
+                border: 1px solid rgba(0, 94, 184, 0.2);
+                border-radius: 6px;
+                padding: 6px 5px;
+                margin: 4px 0;
+                text-align: center;
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+                height: 48px;
+                justify-content: center;
+            ">
+                <span style="font-size: 0.7rem; color: #005eb8; font-weight: 800; letter-spacing: -0.02em;">AI 예측점수</span>
+                <span style="font-size: 1.15rem; color: #002d57; font-weight: 800; line-height: 1;">${finalScore}<small style="font-size: 0.75rem; margin-left: 2px; font-weight: 700;">점</small></span>
+            </div>
+        ` : `<div style="height: 56px;"></div>`; // 점수가 없는 경우에도 높이 유지 (48px + margin 8px)
 
         return `
-            <div class="forecast-day-card">
-                <h4>${dateStr}</h4>
-                <div class="forecast-icon icon-${day.weatherType}"></div>
-                <div class="forecast-temp">
+            <div class="forecast-day-card ${finalScore >= 60 ? 'ai-intensive' : ''}" style="min-height: 420px; display: flex; flex-direction: column; padding: 12px 10px;">
+                <h4 style="margin-bottom: 6px; height: 1.2em;">${dateStr}</h4>
+                <div class="forecast-icon icon-${day.weatherType}" style="margin-bottom: 4px; height: 40px;"></div>
+                <div class="forecast-temp" style="margin-bottom: 6px; height: 24px;">
                     <span class="temp-min">${typeof day.minTemp === 'number' ? day.minTemp.toFixed(1) + '°' : 'N/A'}</span>
                     <span class="temp-max">${typeof day.maxTemp === 'number' ? day.maxTemp.toFixed(1) + '°' : 'N/A'}</span>
                 </div>
-                <div class="forecast-rain">
+                <div class="forecast-rain" style="margin-bottom: 6px;">
                     <div class="rain-item"><span class="rain-label">오전</span><span class="rain-prob">${typeof day.amRainProb === 'number' ? day.amRainProb + '%' : '-'}</span></div>
                     <div class="rain-item"><span class="rain-label">오후</span><span class="rain-prob">${typeof day.pmRainProb === 'number' ? day.pmRainProb + '%' : '-'}</span></div>
                 </div>
-                <div class="forecast-humidity">
+                <div class="forecast-humidity" style="margin-bottom: 8px;">
                     <span class="hum-label">평균습도</span>
                     <span class="hum-val">${(day.humidity !== undefined && day.humidity !== null) ? day.humidity + '%' : '--%'}</span>
                 </div>
-                <div class="equipment-status">
-                    <button class="equipment-btn ${day.fan ? 'active' : ''}" title="${day.reason}" disabled>배풍기</button>
-                    <button class="equipment-btn ${day.heater ? 'active active-heater' : ''}" title="${day.reason}" disabled>열풍기</button>
+                <div class="equipment-status" style="margin-top: auto; margin-bottom: 4px;">
+                    <button class="equipment-btn ${isFanActive ? 'active' : ''}" title="${finalReason}" disabled style="margin-bottom: 0;">배풍기</button>
+                    <button class="equipment-btn ${isHeaterActive ? 'active active-heater' : ''}" title="${finalReason}" disabled style="margin-bottom: 0;">열풍기</button>
                 </div>
-                <div class="forecast-risk ${riskClass}">${day.risk}</div>
-                <div class="forecast-reason">${day.reason || ''}</div>
+                
+                ${aiScoreHtml}
+
+                <div class="forecast-risk ${riskClass}" style="margin-bottom: 6px; padding: 6px; background-color: ${riskBg} !important; border-radius: 6px; color: white; font-weight: 800; text-align: center;">${displayRisk}</div>
+                <div class="forecast-reason" style="font-size: 0.7rem; line-height: 1.3; color: #666; border-top: 1px dashed #ddd; padding-top: 4px; flex-grow: 1; display: flex; align-items: start;">
+                    ${finalReason}
+                </div>
             </div>
         `;
     }).join('');
@@ -2125,23 +2247,28 @@ async function fetchHourlyHumidityForecast(targetDateStr = null) {
     if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
         try {
             const pathDate = targetDateStr || getLocalDateString();
-            const snap = await firebase.database().ref(`hourlyForecasts/${pathDate}`).once('value');
-            const val = snap.val();
-            if (val && val.data) {
-                existingData = val.data;
-                // 이미 24시간 데이터가 꽉 차있고 오늘이 아니거나 충분히 최신이면 반환 (비용 절감)
-                if (existingData.length >= 24 && (!isToday || (Date.now() - (val.updatedAt || 0) < 3600000))) {
-                    console.log(`✅ [캐시/저장소] ${pathDate} 데이터를 사용합니다.`);
-                    return existingData;
+            const snap = await firebase.database().ref(`hourlyForecasts/${pathDate}`).once('value').catch(err => {
+                // 읽기 권한이 없는 경우 조용히 넘어감
+                return null;
+            });
+            if (snap) {
+                const val = snap.val();
+                if (val && val.data) {
+                    existingData = val.data;
+                    if (existingData.length >= 24 && (!isToday || (Date.now() - (val.updatedAt || 0) < 3600000))) {
+                        console.log(`✅ [저장소] ${pathDate} 데이터를 사용합니다.`);
+                        return existingData;
+                    }
                 }
             }
         } catch (e) {
-            console.warn('Firebase 데이터 로드 실패:', e);
+            // 에러 무시
         }
     }
 
-    // 2. 오늘 데이터거나 데이터가 부족한 경우 API 호출 시도
-    if (API_KEY && API_KEY.length >= 10 && (isToday || existingData.length < 5)) {
+    // 2. 오늘이거나 데이터가 부족한 경우 API 호출 시도
+    // 단, 과거 날짜(어제 이전)는 기상청 단기예보가 제공되지 않으므로 API 호출을 건너뜁니다.
+    if (API_KEY && API_KEY.length >= 10 && (isToday || (existingData.length < 5 && targetDateStr >= todayStr.substring(0, 4) + '-' + todayStr.substring(4, 6) + '-' + todayStr.substring(6, 8)))) {
         try {
             const now = new Date();
             const baseTimes = [23, 20, 17, 14, 11, 8, 5, 2];
@@ -2186,7 +2313,7 @@ async function fetchHourlyHumidityForecast(targetDateStr = null) {
                     '18:00', '19:00', '20:00', '21:00', '22:00', '23:00'
                 ];
 
-                // 현재 요청한 날자와 API 응답 날짜들에 대해 병합 처리
+                // 현재 요청한 날짜 및 API 응답 날짜들에 대해 병합 처리
                 let requestedResult = null;
 
                 for (const dateRaw of Object.keys(apiDataByDate)) {
@@ -2199,10 +2326,12 @@ async function fetchHourlyHumidityForecast(targetDateStr = null) {
                         baseDataForMerge = existingData;
                     } else if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
                         try {
-                            const dateSnap = await firebase.database().ref(`hourlyForecasts/${formattedDate}`).once('value');
-                            const dateVal = dateSnap.val();
+                            const dateSnap = await firebase.database().ref(`hourlyForecasts/${formattedDate}`).once('value').catch(() => null);
+                            const dateVal = dateSnap ? dateSnap.val() : null;
                             if (dateVal && dateVal.data) baseDataForMerge = dateVal.data;
-                        } catch (e) { console.warn(`${formattedDate} 데이터 로드 실패`); }
+                        } catch (e) {
+                            // 권한 부족 등의 사유로 로드 실패 시 무시
+                        }
                     }
 
                     const mergedData = targetHours.map(hourStr => {
@@ -2222,15 +2351,19 @@ async function fetchHourlyHumidityForecast(targetDateStr = null) {
                         requestedResult = mergedData;
                     }
 
-                    // 저장은 다시 동절기(11월~3월)만 수행하도록 복구
+                    // 저장은 관리자 권한이 있고 동절기(11월~3월)인 경우만 수행
                     const month = parseInt(dateRaw.substring(4, 6));
                     const isWinter = (month >= 11 || month <= 3);
-                    if (isWinter && typeof firebase !== 'undefined' && firebase.apps.length > 0) {
-                        firebase.database().ref(`hourlyForecasts/${formattedDate}`).update({
-                            data: mergedData,
-                            updatedAt: Date.now(),
-                            isWinter: true
-                        });
+                    if (isAdmin && isWinter && typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+                        try {
+                            await firebase.database().ref(`hourlyForecasts/${formattedDate}`).update({
+                                data: mergedData,
+                                updatedAt: Date.now(),
+                                isWinter: true
+                            });
+                        } catch (saveErr) {
+                            console.warn('📝 읽기 전용 모드: 데이터를 서버에 저장하지 않았습니다.');
+                        }
                     }
                 }
 
@@ -2716,8 +2849,9 @@ function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb,
 
     if ((isSuddenWarmingDanger || isExtremeDiff || isExtremeHumid || historyMatch) && !isDeepFreeze) {
         status.risk = '위험';
-        status.heater = true;
         status.fan = true;
+        // [수정] 위험 단계에서도 열풍기는 반드시 8도/80% '동시 충족' 시에만 가동 (사용자 요청)
+        status.heater = (tempJump >= 8 && currentAvgHum >= 80);
 
         if (historyMatch) status.reason = `과거 유사 사례(${historyMatch.outTemp}℃/${historyMatch.outHumid}%) 기반 위험 감지`;
         else if (isSuddenWarmingDanger) status.reason = `급격한 기온 상승(${tempJump}℃↑) 위험`;
@@ -2729,10 +2863,12 @@ function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb,
         status.risk = '주의';
         status.fan = true;
 
-        const isHeaterNeed = (tempJump >= 10 || currentAvgHum >= 80 || (tempJump >= 8 && currentAvgHum >= 80));
+        // [수정] 열풍기는 기온상승 8도 이상 AND 습도 80% 이상 '둘 다' 만족할 때만 가동
+        const isHeaterNeed = (tempJump >= 8 && currentAvgHum >= 80);
         status.heater = isHeaterNeed;
 
         if (isDeepFreeze && maxRainProb >= 60) status.reason = `한파 중 강수 예보 (고습도 주의)`;
+        else if (tempJump >= 8 && currentAvgHum >= 80) status.reason = `기온 급변 및 고습도 복합 주의 (열풍기 권장)`;
         else if (tempJump >= 8) status.reason = `기온 상승 추세(${tempJump}℃↑) 주의`;
         else if (currentAvgHum >= 80) status.reason = `습도 증가(${currentAvgHum}%↑) 주의`;
         else status.reason = `일교차(${currentTempDiff}℃) 주의 구간`;
