@@ -74,39 +74,89 @@ function calculateDewPoint(T, RH) {
 }
 
 function getRiskLevel(tempDiff, humidity, outdoorTemp = null, outdoorHum = null) {
-    // 1. 과거 사례 매칭 (AI 로직 연동)
-    let historyMatch = null;
-    const historyData = getCondensationHistoryForAlgorithm();
+    // 1. 과거 사례 매칭 (AI 로직 연동) - [개선] 안전 사례도 함께 비교
+    let dangerMatch = null;
+    let safeMatchCount = 0;
+    let dangerMatchCount = 0;
+    const historyResult = getCondensationHistoryForAlgorithm();
+    const dangerData = historyResult.danger || historyResult || [];
+    const safeData = historyResult.safe || [];
 
-    if (outdoorTemp !== null && outdoorHum !== null && historyData && historyData.length > 0) {
-        historyMatch = historyData.find(h => {
-            const hTemp = parseFloat(h.outTemp);
-            const hHum = parseFloat(h.outHumid);
-            return !isNaN(hTemp) && !isNaN(hHum) &&
-                Math.abs(hTemp - outdoorTemp) <= 1.5 &&
-                Math.abs(hHum - outdoorHum) <= 7;
-        });
+    if (outdoorTemp !== null && outdoorHum !== null) {
+        // 위험 이력 매칭
+        if (dangerData.length > 0) {
+            dangerData.forEach(h => {
+                const hTemp = parseFloat(h.outTemp);
+                const hHum = parseFloat(h.outHumid);
+                if (!isNaN(hTemp) && !isNaN(hHum) &&
+                    Math.abs(hTemp - outdoorTemp) <= 1.5 &&
+                    Math.abs(hHum - outdoorHum) <= 7) {
+                    dangerMatchCount++;
+                    if (!dangerMatch) dangerMatch = h;
+                }
+            });
+        }
+
+        // [핵심 개선] 안전 이력 매칭
+        if (safeData.length > 0) {
+            safeData.forEach(h => {
+                const hTemp = parseFloat(h.outTemp);
+                const hHum = parseFloat(h.outHumid);
+                if (!isNaN(hTemp) && !isNaN(hHum) &&
+                    Math.abs(hTemp - outdoorTemp) <= 1.5 &&
+                    Math.abs(hHum - outdoorHum) <= 7) {
+                    safeMatchCount++;
+                }
+            });
+        }
     }
 
-    if (historyMatch) return {
-        label: '위험',
-        class: 'status-danger',
-        reason: `과거 유사 사례(${historyMatch.outTemp}℃/${historyMatch.outHumid}%) 기반 위험 감지`
-    };
+    // [개선] 위험 사례와 안전 사례를 비율로 비교하여 판단
+    if (dangerMatch && dangerMatchCount > 0) {
+        const totalMatch = dangerMatchCount + safeMatchCount;
+        const dangerRatio = dangerMatchCount / totalMatch;
+
+        if (dangerRatio > 0.6) {
+            // 위험 사례가 60% 초과 → 위험 판정
+            return {
+                label: '위험',
+                class: 'status-danger',
+                reason: `과거 유사 사례 기반 위험 감지 (위험${dangerMatchCount}건/안전${safeMatchCount}건)`
+            };
+        } else if (dangerRatio > 0.3) {
+            // 위험 사례가 30~60% → 주의 판정
+            return {
+                label: '주의',
+                class: 'status-caution',
+                reason: `과거 사례 분석: 주의 필요 (위험${dangerMatchCount}건/안전${safeMatchCount}건)`
+            };
+        }
+        // 위험 사례가 30% 이하이면 이력 매칭 결과는 무시하고 물리 기반 판정으로 진행
+    }
+
+    // [추가] 안전 이력만 있는 경우, 물리적으로 위험 구간이라도 안전 쪽으로 보정
+    let safeBias = 0;
+    if (safeMatchCount > 0 && dangerMatchCount === 0) {
+        safeBias = Math.min(safeMatchCount * 0.5, 2.0); // 안전 이력당 0.5도, 최대 2.0도 보정
+    }
 
     // 2. 물리 기반 판정
     const humidityWeight = humidity > 80 ? 1.0 : 0;
-    const adjustedDiff = tempDiff - humidityWeight;
+    const adjustedDiff = tempDiff - humidityWeight + safeBias;
 
     if (adjustedDiff > 5) return {
         label: '안전',
         class: 'status-safe',
-        reason: '강판 온도가 이슬점보다 충분히 높아 안전한 상태입니다.'
+        reason: safeMatchCount > 0
+            ? `강판 온도 안전 + 과거 안전 사례 ${safeMatchCount}건 확인`
+            : '강판 온도가 이슬점보다 충분히 높아 안전한 상태입니다.'
     };
     if (adjustedDiff > 2) return {
         label: '주의',
         class: 'status-caution',
-        reason: '강판 온도와 이슬점 차이가 좁혀지고 있거나 습도가 높습니다. 환기 및 온도 관리를 권장합니다.'
+        reason: safeMatchCount > 0
+            ? `물리적 주의 구간이나 과거 안전 사례 ${safeMatchCount}건 참고`
+            : '강판 온도와 이슬점 차이가 좁혀지고 있거나 습도가 높습니다. 환기 및 온도 관리를 권장합니다.'
     };
     return {
         label: '위험',
@@ -1343,39 +1393,82 @@ function updateCondensationAnalysis(data) {
 
 /**
  * 알고리즘에서 사용할 수 있도록 결로 이력 데이터를 간단한 배열 형태로 반환합니다.
+ * [개선] 결로 발생(위험) 데이터와 결로 미발생(안전) 데이터를 모두 수집하여
+ * 균형 잡힌 예측이 가능하도록 합니다.
+ * 반환 형태: { danger: [...], safe: [...] }
  */
 function getCondensationHistoryForAlgorithm() {
-    const historyData = [];
+    const dangerData = []; // 결로 발생 이력
+    const safeData = [];   // 결로 미발생 이력
+
+    // 1. 수동 입력 이력(manual_history)에서 수집 - 결로 발생 건
     if (monitoringLogs) {
         monitoringLogs.forEach(log => {
             if (log && log.source === 'manual_history') {
-                historyData.push({
+                dangerData.push({
                     outTemp: log.outdoorTemp,
-                    outHumid: log.outdoorHum
+                    outHumid: log.outdoorHum,
+                    risk: log.risk || '위험'
                 });
             }
         });
     }
+
+    // 2. 보고서(reports)에서 수집 - 결로 발생 + 안전 모두 수집
     if (allReports) {
         Object.keys(allReports).forEach(date => {
             const day = allReports[date];
             if (day && typeof day === 'object') {
                 Object.keys(day).forEach(slot => {
                     const r = day[slot];
-                    if (r && r.snapshot) {
+                    if (r && r.snapshot && r.outdoor) {
+                        const outTemp = typeof r.outdoor === 'object' ? r.outdoor.temp : parseFloat(r.outdoor);
+                        const outHumid = typeof r.outdoor === 'object' ? r.outdoor.humidity :
+                            (typeof r.outdoor === 'string' && r.outdoor.includes('/') ? parseFloat(r.outdoor.split('/')[1]) : 0);
+
+                        if (isNaN(outTemp) || isNaN(outHumid)) return;
+
                         const hasCondensation = Object.values(r.snapshot).some(s => s.product === '결로 인지');
-                        if (hasCondensation && r.outdoor) {
-                            historyData.push({
-                                outTemp: typeof r.outdoor === 'object' ? r.outdoor.temp : parseFloat(r.outdoor),
-                                outHumid: typeof r.outdoor === 'object' ? r.outdoor.humidity : (r.outdoor.includes('/') ? parseFloat(r.outdoor.split('/')[1]) : 0)
-                            });
+
+                        if (hasCondensation) {
+                            dangerData.push({ outTemp, outHumid, risk: '위험' });
+                        } else {
+                            // [핵심 개선] 결로가 발생하지 않은 안전 데이터도 수집
+                            safeData.push({ outTemp, outHumid, risk: '안전' });
                         }
                     }
                 });
             }
         });
     }
-    return historyData;
+
+    // 3. 일반 모니터링 로그에서도 안전/위험 데이터 추가 수집
+    if (monitoringLogs) {
+        monitoringLogs.forEach(log => {
+            if (log && log.source !== 'manual_history' && log.outdoorTemp !== undefined && log.outdoorHum !== undefined) {
+                const entry = {
+                    outTemp: parseFloat(log.outdoorTemp),
+                    outHumid: parseFloat(log.outdoorHum),
+                    risk: log.risk || '안전'
+                };
+                if (isNaN(entry.outTemp) || isNaN(entry.outHumid)) return;
+
+                if (log.risk === '위험') {
+                    dangerData.push(entry);
+                } else if (log.risk === '안전') {
+                    safeData.push(entry);
+                }
+            }
+        });
+    }
+
+    // 하위 호환성을 위해 기존 형태(배열)와 새 형태(객체) 모두 지원
+    // 배열로 접근 시: dangerData만 반환 (기존 동작)
+    // 객체로 접근 시: { danger, safe } 모두 반환
+    const result = dangerData;
+    result.danger = dangerData;
+    result.safe = safeData;
+    return result;
 }
 
 function formatSnapshotTime(time, slot) {
@@ -2814,6 +2907,7 @@ function updateCurrentTime() {
 }
 
 // 고도화된 결로 예측 알고리즘 (빅데이터 분석 및 Sudden Warming 반영)
+// [개선] 결로 미발생(안전) 이력도 함께 분석하여 균형 잡힌 판단 수행
 function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb, humidity, prevMinTemp, historyData = []) {
     const maxRainProb = Math.max(amRainProb, pmRainProb);
     const currentTempDiff = Number((maxTemp - minTemp).toFixed(1));
@@ -2831,17 +2925,47 @@ function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb,
     };
 
     // [빅데이터 매칭] 과거 발생 이력과 현재 예보 데이터 비교
-    let historyMatch = null;
-    if (historyData && historyData.length > 0) {
-        // 현재 최고 기온(공기 온도)과 습도가 과거 발생 당시와 유사한지 체크
-        historyMatch = historyData.find(h => {
+    // [개선] 위험 이력과 안전 이력을 구분하여 분석
+    let dangerMatchCount = 0;
+    let safeMatchCount = 0;
+    let firstDangerMatch = null;
+
+    // historyData가 새로운 형식(danger/safe 분리) 또는 기존 형식(배열)인지 확인
+    const dangerHistory = historyData.danger || historyData || [];
+    const safeHistory = historyData.safe || [];
+
+    if (dangerHistory.length > 0) {
+        dangerHistory.forEach(h => {
             const hTemp = parseFloat(h.outTemp);
             const hHum = parseFloat(h.outHumid);
-            return !isNaN(hTemp) && !isNaN(hHum) &&
-                Math.abs(hTemp - maxTemp) <= 1.5 && // 온도 오차 1.5도 이내
-                Math.abs(hHum - currentAvgHum) <= 7;   // 습도 오차 7% 이내
+            if (!isNaN(hTemp) && !isNaN(hHum) &&
+                Math.abs(hTemp - maxTemp) <= 1.5 &&
+                Math.abs(hHum - currentAvgHum) <= 7) {
+                dangerMatchCount++;
+                if (!firstDangerMatch) firstDangerMatch = h;
+            }
         });
     }
+
+    // [핵심 개선] 안전 이력 매칭
+    if (safeHistory.length > 0) {
+        safeHistory.forEach(h => {
+            const hTemp = parseFloat(h.outTemp);
+            const hHum = parseFloat(h.outHumid);
+            if (!isNaN(hTemp) && !isNaN(hHum) &&
+                Math.abs(hTemp - maxTemp) <= 1.5 &&
+                Math.abs(hHum - currentAvgHum) <= 7) {
+                safeMatchCount++;
+            }
+        });
+    }
+
+    // [개선] 이력 기반 위험도 결정 (위험/안전 비율 분석)
+    const totalMatch = dangerMatchCount + safeMatchCount;
+    const dangerRatio = totalMatch > 0 ? (dangerMatchCount / totalMatch) : 0;
+    const hasStrongDangerHistory = (dangerMatchCount > 0 && dangerRatio > 0.6);
+    const hasWeakDangerHistory = (dangerMatchCount > 0 && dangerRatio > 0.3 && dangerRatio <= 0.6);
+    const hasSafeHistory = (safeMatchCount > 0 && dangerMatchCount === 0);
 
     // 1. 위험 (Danger) 판정 기준
     const isSuddenWarmingDanger = (tempJump >= 10 && currentAvgHum >= 65);
@@ -2849,38 +2973,81 @@ function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb,
     const isExtremeHumid = (currentAvgHum >= 85 && maxTemp > 0);
     const isDeepFreeze = (maxTemp <= 3);
 
-    if ((isSuddenWarmingDanger || isExtremeDiff || isExtremeHumid || historyMatch) && !isDeepFreeze) {
-        status.risk = '위험';
-        status.fan = true;
-        // [수정] 위험 단계에서도 열풍기는 반드시 8도/80% '동시 충족' 시에만 가동 (사용자 요청)
-        status.heater = (tempJump >= 8 && currentAvgHum >= 80);
+    // [개선] 안전 이력이 충분히 있는 경우, 물리적 위험 판정 기준을 완화
+    const physicalDanger = isSuddenWarmingDanger || isExtremeDiff || isExtremeHumid;
+    const historyDanger = hasStrongDangerHistory;
 
-        if (historyMatch) status.reason = `과거 유사 사례(${historyMatch.outTemp}℃/${historyMatch.outHumid}%) 기반 위험 감지`;
-        else if (isSuddenWarmingDanger) status.reason = `급격한 기온 상승(${tempJump}℃↑) 위험`;
-        else if (isExtremeDiff) status.reason = `극심한 일교차(${currentTempDiff}℃↑) 위험`;
-        else status.reason = `초고습(${currentAvgHum}%↑) 환경 위험`;
+    // 안전 이력이 있으면 물리적 위험만으로는 '주의'로 완화 가능
+    if ((physicalDanger || historyDanger) && !isDeepFreeze) {
+        if (hasSafeHistory && !physicalDanger) {
+            // 이력상 위험이지만 안전 사례만 있고 물리적 위험 요소 없음 → 주의로 완화
+            status.risk = '주의';
+            status.fan = true;
+            status.heater = false;
+            status.reason = `과거 안전 사례 ${safeMatchCount}건 확인, 모니터링 권장`;
+        } else if (hasWeakDangerHistory && !physicalDanger) {
+            // 위험/안전 비율이 비등한 경우 → 주의
+            status.risk = '주의';
+            status.fan = true;
+            status.heater = false;
+            status.reason = `과거 사례 혼재 (위험${dangerMatchCount}/안전${safeMatchCount}건), 배풍기 가동 권장`;
+        } else {
+            status.risk = '위험';
+            status.fan = true;
+            status.heater = (tempJump >= 8 && currentAvgHum >= 80);
+
+            if (historyDanger) {
+                status.reason = `과거 유사 사례 기반 위험 감지 (위험${dangerMatchCount}건/안전${safeMatchCount}건)`;
+            } else if (isSuddenWarmingDanger) {
+                status.reason = `급격한 기온 상승(${tempJump}℃↑) 위험`;
+            } else if (isExtremeDiff) {
+                status.reason = `극심한 일교차(${currentTempDiff}℃↑) 위험`;
+            } else {
+                status.reason = `초고습(${currentAvgHum}%↑) 환경 위험`;
+            }
+
+            // 안전 사례가 있으면 reason에 참고 정보 추가
+            if (safeMatchCount > 0) {
+                status.reason += ` (※ 유사 조건 안전 ${safeMatchCount}건 참고)`;
+            }
+        }
     }
     // 2. 주의 (Caution) 판정 기준
     else if (currentTempDiff >= 8 || currentAvgHum >= 80 || tempJump >= 8 || isDeepFreeze && maxRainProb >= 60) {
-        status.risk = '주의';
-        status.fan = true;
-
-        // [수정] 열풍기는 기온상승 8도 이상 AND 습도 80% 이상 '둘 다' 만족할 때만 가동
-        const isHeaterNeed = (tempJump >= 8 && currentAvgHum >= 80);
-        status.heater = isHeaterNeed;
-
-        if (isDeepFreeze && maxRainProb >= 60) status.reason = `한파 중 강수 예보 (고습도 주의)`;
-        else if (tempJump >= 8 && currentAvgHum >= 80) status.reason = `기온 급변 및 고습도 복합 주의 (열풍기 권장)`;
-        else if (tempJump >= 8) status.reason = `기온 상승 추세(${tempJump}℃↑) 주의`;
-        else if (currentAvgHum >= 80) status.reason = `습도 증가(${currentAvgHum}%↑) 주의`;
-        else status.reason = `일교차(${currentTempDiff}℃) 주의 구간`;
-
-        if (isDeepFreeze && currentAvgHum < 75 && maxRainProb < 50) {
+        // [개선] 안전 이력이 많으면 주의 → 안전으로 완화 가능
+        if (hasSafeHistory && safeMatchCount >= 3 && currentAvgHum < 80) {
             status.risk = '안전';
             status.fan = false;
             status.heater = false;
-            status.reason = '지속 한파 (안전)';
+            status.reason = `과거 안전 사례 ${safeMatchCount}건 확인, 현재 조건 안전`;
+        } else {
+            status.risk = '주의';
+            status.fan = true;
+
+            const isHeaterNeed = (tempJump >= 8 && currentAvgHum >= 80);
+            status.heater = isHeaterNeed;
+
+            if (isDeepFreeze && maxRainProb >= 60) status.reason = `한파 중 강수 예보 (고습도 주의)`;
+            else if (tempJump >= 8 && currentAvgHum >= 80) status.reason = `기온 급변 및 고습도 복합 주의 (열풍기 권장)`;
+            else if (tempJump >= 8) status.reason = `기온 상승 추세(${tempJump}℃↑) 주의`;
+            else if (currentAvgHum >= 80) status.reason = `습도 증가(${currentAvgHum}%↑) 주의`;
+            else status.reason = `일교차(${currentTempDiff}℃) 주의 구간`;
+
+            // 안전 사례가 있으면 참고 정보 추가
+            if (safeMatchCount > 0) {
+                status.reason += ` (※ 유사 조건 안전 ${safeMatchCount}건 참고)`;
+            }
+
+            if (isDeepFreeze && currentAvgHum < 75 && maxRainProb < 50) {
+                status.risk = '안전';
+                status.fan = false;
+                status.heater = false;
+                status.reason = '지속 한파 (안전)';
+            }
         }
+    } else if (hasSafeHistory) {
+        // [추가] 물리적으로 안전하면서 안전 이력도 있는 경우, 신뢰도 표시
+        status.reason = `정상 범위 (과거 안전 사례 ${safeMatchCount}건 확인)`;
     }
 
     return status;
