@@ -1716,7 +1716,15 @@ function init() {
             const val = snapshot.val();
             if (val) {
                 excelSafeData = Object.values(val);
-                console.log(`📂 Firebase에서 엑셀 안전 데이터 ${excelSafeData.length}건을 로드했습니다.`);
+                console.log(`📂 Firebase에서 엑셀 안전 데이터 ${excelSafeData.length}건을 로드 및 갱신했습니다.`);
+
+                // [핵심 수정] 데이터가 로드되면 즉시 주간 예보를 다시 그려서 점수 보정 반영
+                if (cachedForecast) {
+                    console.log('🔄 엑셀 데이터 로드 완료에 따른 주간 예측 점수 재계산 중...');
+                    displayWeeklyForecast(cachedForecast);
+                    updateManagementGuide(cachedForecast);
+                }
+
                 if (document.getElementById('history-view').classList.contains('active')) {
                     updateCondensationHistory();
                 }
