@@ -72,12 +72,25 @@ class CondensationAIPredictor:
                             # [핵심 개선] 결로 미발생 건도 수집
                             safe_cases.append({'out_t': out_t, 'out_h': out_h})
 
+        # 엑셀 업로드 데이터에서 수집
+        excel_safe = self.fetch_firebase("excelSafeData")
+        if isinstance(excel_safe, dict):
+            for d in excel_safe.values():
+                if not isinstance(d, dict): continue
+                # Python 예측기는 주로 실외 데이터(maxTemp)와 매칭하므로 outTemp가 있는 것을 우선 활용
+                out_t = d.get('outTemp')
+                out_h = d.get('outHumid')
+                if out_t is not None and out_h is not None:
+                    safe_cases.append({'out_t': float(out_t), 'out_h': float(out_h)})
+                # 내부 데이터만 있는 경우, 일단 로그 수집에 포함시킬 수 있으나
+                # 주간 예보(실외 예보 기반)에서는 영향력이 제한적임
+
         if danger_cases:
             self.danger_patterns = pd.DataFrame(danger_cases)
         if safe_cases:
             self.safe_patterns = pd.DataFrame(safe_cases)
 
-        print(f"📊 이력 분석 완료 - 위험 사례: {len(danger_cases)}건, 안전 사례: {len(safe_cases)}건")
+        print(f"📊 이력 분석 완료 - 위험 사례: {len(danger_cases)}건, 안전 사례: {len(safe_cases)}건 (엑셀 포함)")
 
     def _calc_history_score(self, temp_max, humidity):
         """[개선] 위험/안전 이력 비율을 기반으로 균형 잡힌 이력 점수 산출"""

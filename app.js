@@ -29,6 +29,7 @@ const historyItemsPerPage = 10; // 결로 이력 페이지당 항목 수
 let kmaShortApiKey = ""; // 단기예보 API 키
 let kmaMidApiKey = ""; // 중기예보 API 키
 let aiForecastData = null; // AI 예측 데이터 (Python 연동)
+let excelSafeData = []; // 엑셀에서 업로드된 안전 데이터
 
 // ========== 3. DOM 요소 참조 ==========
 const elements = {
@@ -100,12 +101,22 @@ function getRiskLevel(tempDiff, humidity, outdoorTemp = null, outdoorHum = null)
         // [핵심 개선] 안전 이력 매칭
         if (safeData.length > 0) {
             safeData.forEach(h => {
-                const hTemp = parseFloat(h.outTemp);
-                const hHum = parseFloat(h.outHumid);
-                if (!isNaN(hTemp) && !isNaN(hHum) &&
-                    Math.abs(hTemp - outdoorTemp) <= 1.5 &&
-                    Math.abs(hHum - outdoorHum) <= 7) {
-                    safeMatchCount++;
+                // 1. 실외 데이터 기준 매칭
+                if (h.outTemp !== undefined) {
+                    const hTemp = parseFloat(h.outTemp);
+                    const hHum = parseFloat(h.outHumid);
+                    if (!isNaN(hTemp) && !isNaN(hHum) &&
+                        Math.abs(hTemp - outdoorTemp) <= 1.5 &&
+                        Math.abs(hHum - outdoorHum) <= 7) {
+                        safeMatchCount++;
+                    }
+                }
+                // 2. 내부 데이터 기준 매칭 (실시간 측정 습도와 대조)
+                else if (h.inTemp !== undefined) {
+                    const hHum = parseFloat(h.inHumid);
+                    if (!isNaN(hHum) && Math.abs(hHum - humidity) <= 5) {
+                        safeMatchCount++;
+                    }
                 }
             });
         }
@@ -1359,10 +1370,16 @@ function changeHistoryPage(page) {
  * @param {Array} data - 결로 이력 데이터 배열
  */
 function updateCondensationAnalysis(data) {
+    const safeCountEl = document.getElementById('stat-safe-count');
     const totalCountEl = document.getElementById('stat-total-count');
     const outdoorTempEl = document.getElementById('stat-avg-outdoor-temp');
     const outdoorHumEl = document.getElementById('stat-avg-outdoor-hum');
     const avgDiffEl = document.getElementById('stat-avg-diff');
+
+    // 엑셀 안전 데이터 건수 표시
+    if (safeCountEl) {
+        safeCountEl.textContent = `${excelSafeData.length} 건`;
+    }
 
     if (!totalCountEl || data.length === 0) {
         if (totalCountEl) totalCountEl.textContent = '0 건';
@@ -1459,6 +1476,21 @@ function getCondensationHistoryForAlgorithm() {
                     safeData.push(entry);
                 }
             }
+        });
+    }
+
+    // 4. 엑셀에서 업로드된 안전 데이터 추가
+    if (excelSafeData && excelSafeData.length > 0) {
+        excelSafeData.forEach(d => {
+            const entry = { risk: '안전', source: 'excel' };
+            if (d.outTemp !== undefined) {
+                entry.outTemp = parseFloat(d.outTemp);
+                entry.outHumid = parseFloat(d.outHumid);
+            } else if (d.inTemp !== undefined) {
+                entry.inTemp = parseFloat(d.inTemp);
+                entry.inHumid = parseFloat(d.inHumid);
+            }
+            safeData.push(entry);
         });
     }
 
@@ -1675,6 +1707,18 @@ function init() {
                 if (cachedForecast) {
                     displayWeeklyForecast(cachedForecast);
                     updateManagementGuide(cachedForecast);
+                }
+            }
+        });
+
+        // 엑셀 안전 데이터 로드
+        db.ref('excelSafeData').on('value', snapshot => {
+            const val = snapshot.val();
+            if (val) {
+                excelSafeData = Object.values(val);
+                console.log(`📂 Firebase에서 엑셀 안전 데이터 ${excelSafeData.length}건을 로드했습니다.`);
+                if (document.getElementById('history-view').classList.contains('active')) {
+                    updateCondensationHistory();
                 }
             }
         });
@@ -2950,12 +2994,22 @@ function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb,
     // [핵심 개선] 안전 이력 매칭
     if (safeHistory.length > 0) {
         safeHistory.forEach(h => {
-            const hTemp = parseFloat(h.outTemp);
-            const hHum = parseFloat(h.outHumid);
-            if (!isNaN(hTemp) && !isNaN(hHum) &&
-                Math.abs(hTemp - maxTemp) <= 1.5 &&
-                Math.abs(hHum - currentAvgHum) <= 7) {
-                safeMatchCount++;
+            // 주간 예보에서는 주로 실외 기온(maxTemp)과 습도(currentAvgHum/KMA)를 기준으로 매칭
+            if (h.outTemp !== undefined) {
+                const hTemp = parseFloat(h.outTemp);
+                const hHum = parseFloat(h.outHumid);
+                if (!isNaN(hTemp) && !isNaN(hHum) &&
+                    Math.abs(hTemp - maxTemp) <= 1.5 &&
+                    Math.abs(hHum - currentAvgHum) <= 7) {
+                    safeMatchCount++;
+                }
+            }
+            // 내부 데이터만 있는 경우, 예보 습도와 유사한 안전 이력이 있는지 참고
+            else if (h.inTemp !== undefined) {
+                const hHum = parseFloat(h.inHumid);
+                if (!isNaN(hHum) && Math.abs(hHum - currentAvgHum) <= 5) {
+                    safeMatchCount++;
+                }
             }
         });
     }
@@ -3051,4 +3105,158 @@ function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb,
     }
 
     return status;
+}
+
+// ========== 19. 엑셀 데이터 분석 및 업로드 (Excel Integration) ==========
+async function handleExcelUpload(event) {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    if (!isAdmin) {
+        alert('관리자만 데이터를 업로드할 수 있습니다.');
+        return;
+    }
+
+    const uploadBtn = document.querySelector('button[onclick*="excel-upload-input"]');
+    const originalText = uploadBtn ? uploadBtn.textContent : '📂 엑셀 데이터 업로드';
+    if (uploadBtn) {
+        uploadBtn.textContent = `⏳ ${files.length}개 파일 처리 중...`;
+        uploadBtn.disabled = true;
+    }
+
+    let allExtractedData = [];
+    const processFile = (file) => {
+        return new Promise((resolve, reject) => {
+            if (typeof XLSX === 'undefined') {
+                reject(new Error('Excel 라이브러리(XLSX)를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.'));
+                return;
+            }
+            console.log('Processing file:', file.name);
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    workbook.SheetNames.forEach(sheetName => {
+                        const sheet = workbook.Sheets[sheetName];
+                        const jsonData = XLSX.utils.sheet_to_json(sheet);
+                        if (jsonData.length === 0) return;
+                        const headers = Object.keys(jsonData[0]);
+                        const patterns = [
+                            { t: /1CCL.*외부.*온도/, h: /1CCL.*외부.*습도/, type: 'out' },
+                            { t: /SSCL.*외부.*온도/, h: /SSCL.*외부.*습도/, type: 'out' },
+                            { t: /1CCL.*내부.*온도/, h: /1CCL.*내부.*습도/, type: 'in' },
+                            { t: /2CCL.*내부.*온도/, h: /2CCL.*내부.*습도/, type: 'in' },
+                            { t: /3CCL.*내부.*온도/, h: /3CCL.*내부.*습도/, type: 'in' },
+                            { t: /외부.*온도/, h: /외부.*습도/, type: 'out' },
+                            { t: /내부.*온도/, h: /내부.*습도/, type: 'in' }
+                        ];
+                        // 최적화: 시트당 한 번만 컬럼 인덱스 찾기
+                        const patternKeys = patterns.map(p => ({
+                            tKey: headers.find(h => p.t.test(h)),
+                            hKey: headers.find(h => p.h.test(h)),
+                            type: p.type
+                        })).filter(pk => pk.tKey && pk.hKey);
+
+                        if (patternKeys.length === 0) {
+                            console.warn('Matching columns not found in sheet:', sheetName);
+                            return;
+                        }
+
+                        jsonData.forEach(row => {
+                            patternKeys.forEach(pk => {
+                                const valT = parseFloat(row[pk.tKey]);
+                                const valH = parseFloat(row[pk.hKey]);
+                                if (!isNaN(valT) && !isNaN(valH)) {
+                                    allExtractedData.push({
+                                        timestamp: Date.now(),
+                                        dateTime: row['DateTime'] || row['일시'] || row['Date'] || '-',
+                                        fileName: file.name,
+                                        [pk.type === 'out' ? 'outTemp' : 'inTemp']: valT,
+                                        [pk.type === 'out' ? 'outHumid' : 'inHumid']: valH
+                                    });
+                                }
+                            });
+                        });
+                    });
+                    resolve();
+                } catch (err) { reject(err); }
+            };
+            reader.onerror = reject;
+            reader.readAsArrayBuffer(file);
+        });
+    };
+
+    try {
+        console.log('Starting file processing for', files.length, 'files');
+        try {
+            await Promise.all(Array.from(files).map(async f => {
+                try {
+                    await processFile(f);
+                } catch (fileErr) {
+                    throw new Error(`파일 처리 중 오류 (${f.name}): ${fileErr.message || fileErr}`);
+                }
+            }));
+        } catch (procErr) {
+            throw procErr;
+        }
+        console.log('Extraction complete. Total items:', allExtractedData.length);
+
+        if (allExtractedData.length === 0) {
+            alert('유효한 데이터를 찾을 수 없습니다.');
+            if (uploadBtn) {
+                uploadBtn.textContent = originalText;
+                uploadBtn.disabled = false;
+            }
+            return;
+        }
+
+        if (confirm(`${files.length}개 파일에서 ${allExtractedData.length}건을 추출했습니다.\n학습시키겠습니까?`)) {
+            if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+
+                const dbRef = firebase.database().ref('excelSafeData');
+                const chunkSize = 500;
+                for (let i = 0; i < allExtractedData.length; i += chunkSize) {
+                    try {
+                        const chunk = allExtractedData.slice(i, i + chunkSize);
+                        const updates = {};
+                        chunk.forEach(item => { updates[dbRef.push().key] = item; });
+                        await dbRef.update(updates);
+                        if (uploadBtn) uploadBtn.textContent = `⏳ 업로드 (${Math.round((i / allExtractedData.length) * 100)}%)`;
+                    } catch (uploadErr) {
+                        if (uploadErr.message.includes('PERMISSION_DENIED')) {
+                            console.warn('Firebase 권한 부족. 로컬 스토리지로 전환합니다.');
+                            throw { code: 'PERMISSION_DENIED', originalError: uploadErr };
+                        }
+                        throw new Error(`Firebase 업로드 중 오류 (Chunk ${i / chunkSize + 1}): ${uploadErr.message}`);
+                    }
+                }
+                alert('업로드 완료 (Firebase)');
+            } else {
+                saveToLocal();
+            }
+        }
+    } catch (err) {
+        if (err.code === 'PERMISSION_DENIED') {
+            if (confirm('Firebase 서버에 저장할 권한이 없습니다.\n대신 이 브라우저(로컬)에 저장하여 학습에 반영할까요?')) {
+                saveToLocal();
+            }
+        } else {
+            console.error('handleExcelUpload error:', err);
+            alert('처리 중 오류 발생: ' + (err.message || err));
+        }
+    } finally {
+
+        function saveToLocal() {
+            excelSafeData = excelSafeData.concat(allExtractedData);
+            localStorage.setItem('seah_excel_safe_data', JSON.stringify(excelSafeData));
+            alert(`${allExtractedData.length}건의 데이터를 로컬에 저장했습니다.\n(※ 서버 권한 문제로 인해 본인 브라우저에만 반영됩니다.)`);
+            updateCondensationHistory();
+        }
+        if (uploadBtn) {
+            uploadBtn.textContent = originalText;
+            uploadBtn.disabled = false;
+        }
+        event.target.value = '';
+    }
 }

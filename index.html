@@ -7,8 +7,6 @@
     <link rel="icon" type="image/jpeg" href="seah-logo.jpg">
     <title>세아씨엠 결로 방지 모니터링 시스템</title>
     <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="styles_ai_fix.css">
-    <link rel="stylesheet" href="responsive_tablet.css">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#002d57">
     <script>
@@ -423,16 +421,27 @@
                 <div>
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <h2>🚨 결로 발생 분석 및 이력</h2>
-                        <button onclick="openPastRecordModal()" class="btn-nav admin-only"
-                            style="background: var(--seah-orange); color: white;">➕ 과거 이력 등록</button>
+                        <div class="admin-only" style="display: flex; gap: 10px;">
+                            <button onclick="document.getElementById('excel-upload-input').click()" class="btn-nav"
+                                style="background: #34a853; color: white;">📂 엑셀 데이터 업로드</button>
+                            <input type="file" id="excel-upload-input" style="display: none;" multiple accept="*/*"
+                                onchange="handleExcelUpload(event)">
+                            <button onclick="openPastRecordModal()" class="btn-nav"
+                                style="background: var(--seah-orange); color: white;">➕ 과거 이력 등록</button>
+                        </div>
                     </div>
-                    <p class="text-muted">축적된 과거 결로 발생 데이터를 토대로 주간 예보의 정확도를 높입니다.</p>
+                    <p class="text-muted">축적된 과거 결로 발생 데이터를 토대로 주간 예보의 정확도를 높입니다. (엑셀 업로드는 자동 '안전' 데이터로 분류됩니다.)</p>
                 </div>
 
                 <!-- 결로 분석 상단 카드 -->
                 <div class="analysis-stats-container mt-md">
+                    <div class="stat-card stat-green">
+                        <span class="stat-label">학습용 안전 데이터</span>
+                        <strong id="stat-safe-count" class="stat-value-mini">0 건</strong>
+                        <span class="stat-sub-label">엑셀 업로드 등 안전 사례 (학습용)</span>
+                    </div>
                     <div class="stat-card stat-blue">
-                        <span class="stat-label">총 발생 횟수</span>
+                        <span class="stat-label">총 발생(위험) 횟수</span>
                         <strong id="stat-total-count" class="stat-value-mini">0 건</strong>
                         <span class="stat-sub-label">기준: 수동 등록 및 점검 결과 합계</span>
                     </div>
@@ -554,6 +563,9 @@
         firebase.initializeApp(firebaseConfig);
         firebase.analytics();
     </script>
+
+    <!-- Excel Parsing Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
     <!-- 앱 로직 실행 -->
     <script src="app.js"></script>

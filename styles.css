@@ -3625,4 +3625,232 @@ body.is-admin .header-inputs.admin-only {
  . f o r e c a s t - d a y - c a r d   {  
          p o s i t i o n :   r e l a t i v e   ! i m p o r t a n t ;  
  }  
- 
+ @media (max-width: 480px) {
+    .hourly-section-items {
+        grid-template-columns: repeat(3, 1fr) !important;
+    }
+}
+
+/* AI ?덉륫 愿???ㅽ???- 理쒖쥌 怨좎젙 */
+.ai-risk-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: #005eb8 !important;
+    /* ?몄븘 釉붾（濡?吏곸젒 吏??*/
+    border-radius: 6px;
+    padding: 3px 8px;
+    border: 1px solid #ffffff;
+    z-index: 100 !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.ai-label {
+    font-size: 0.6rem !important;
+    color: #ffffff !important;
+    font-weight: 900 !important;
+    line-height: 1;
+    margin-bottom: 2px;
+}
+
+.ai-score {
+    font-size: 0.9rem !important;
+    color: #ffffff !important;
+    font-weight: 900 !important;
+}
+
+.ai-intensive {
+    border: 3px solid #005eb8 !important;
+    background: #f8fbff !important;
+    box-shadow: 0 4px 15px rgba(0, 94, 184, 0.2) !important;
+}
+
+.forecast-day-card {
+    position: relative !important;
+}
+/* ========== ?몄븘?⑥뿞 寃곕줈 愿由??쒖뒪??- ?쒕툝由?諛?諛섏쓳??怨좊룄???섎┝ 諛⑹?) ========== */
+
+/* ?꾩뿭 ?섎┝ 諛⑹? */
+html,
+body {
+    overflow-x: hidden;
+    width: 100%;
+}
+
+.container {
+    width: 100%;
+    max-width: 100vw;
+    padding: 15px !important;
+    overflow-x: hidden;
+}
+
+/* 1. ????쒕툝由?諛??뚰삎 ?명듃遺?(~1200px) */
+@media screen and (max-width: 1200px) {
+    .dashboard-grid {
+        grid-template-areas:
+            "risk weather"
+            "report report"
+            "main main"
+            "history history" !important;
+        grid-template-columns: 1fr 1fr !important;
+        /* 3???ш린, 2?대줈 ?덉쟾?섍쾶 ?꾪솚 */
+        gap: 15px !important;
+    }
+}
+
+/* 2. 以묓삎 ?쒕툝由?(1024px ?댄븯) */
+@media screen and (max-width: 1024px) {
+    .status-card .status-value {
+        font-size: 2.2rem !important;
+        /* 湲???ш린 異뺤냼?섏뿬 寃뱀묠 諛⑹? */
+    }
+
+    .metrics-row {
+        gap: 5px !important;
+    }
+
+    .metric-box strong {
+        font-size: 1rem !important;
+    }
+
+    .status-list {
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)) !important;
+        /* 怨좎젙 ??????먮룞 梨꾩슦湲?*/
+    }
+
+    .weekly-forecast-grid {
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)) !important;
+    }
+}
+
+/* 3. ?뚰삎 ?쒕툝由?諛??몃줈 紐⑤뱶 (850px ?댄븯) */
+@media screen and (max-width: 850px) {
+    .main-header {
+        flex-direction: column !important;
+        gap: 10px !important;
+        text-align: center;
+    }
+
+    .header-left {
+        flex-direction: column !important;
+        margin-right: 0 !important;
+    }
+
+    .header-right {
+        width: 100% !important;
+        justify-content: center !important;
+        flex-direction: column !important;
+    }
+
+    .dashboard-grid {
+        grid-template-columns: 1fr !important;
+        /* 1?대줈 ?꾪솚 */
+        grid-template-areas:
+            "risk"
+            "weather"
+            "report"
+            "main"
+            "history" !important;
+    }
+
+    .status-card {
+        padding: 20px 10px !important;
+    }
+
+    .status-card>div:not(h3) {
+        flex-direction: column !important;
+        /* ?꾪뿕???대? ?붿냼 ?몃줈 諛곗튂?섏뿬 寃뱀묠 ?닿껐 */
+        gap: 10px;
+    }
+
+    .status-card .metrics-row {
+        width: 100% !important;
+        justify-content: space-around !important;
+    }
+
+    /* ?몃씪???ㅽ??쇰줈 ?묒꽦???몃줈 援щ텇???④린湲?*/
+    .status-card div[style*="width: 1px"] {
+        display: none !important;
+    }
+
+    .weather-horizontal-wrap {
+        flex-direction: column !important;
+        gap: 15px !important;
+    }
+}
+
+/* 媛濡?紐⑤뱶?먯꽌 ?붾㈃???섎━??寃쎌슦????????*/
+@media screen and (max-height: 600px) and (orientation: landscape) {
+    .container {
+        padding: 10px !important;
+    }
+
+    .brand-logo {
+        height: 35px !important;
+    }
+}
+
+/* 4. 理쒖쥌 紐⑤컮??(480px ?댄븯) */
+@media screen and (max-width: 480px) {
+    .status-value {
+        font-size: 1.8rem !important;
+    }
+
+    .status-list {
+        grid-template-columns: 1fr !important;
+    }
+
+    .report-slots {
+        grid-template-columns: 1fr !important;
+    }
+
+    .hourly-section-items {
+        grid-template-columns: repeat(3, 1fr) !important;
+    }
+}
+
+/* 怨듯넻 媛쒖꽑 ?ы빆 諛??섏묠 諛⑹? */
+.card {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+}
+
+.table-container {
+    max-width: 100% !important;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* ?꾩튂蹂??꾪솴 移대뱶 ?대? 理쒖쟻??(湲???섎┝ 諛⑹?) */
+.status-item {
+    min-width: 0 !important;
+    /* flex/grid ?대??먯꽌 ?섏묠 諛⑹? */
+}
+
+.loc-data-grid {
+    gap: 5px !important;
+}
+
+.data-group .val {
+    font-size: 0.85rem !important;
+}
+
+/* ?뚯씠釉?媛뺤젣 ?ㅽ겕濡?諛??덈궡 */
+#history-view .table-container {
+    width: 100% !important;
+    overflow-x: auto !important;
+    position: relative;
+}
+
+/* ?ㅽ겕濡ㅻ컮 ?붿옄??(?쒕툝由??곗튂 ??? */
+.table-container::-webkit-scrollbar {
+    height: 6px;
+}
+
+.table-container::-webkit-scrollbar-thumb {
+    background: #ccc;
+    border-radius: 3px;
+}
