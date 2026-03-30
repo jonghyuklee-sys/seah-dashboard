@@ -249,7 +249,8 @@ class CondensationAIPredictor:
 
             total_score = max(0, min(99, p_score + h_score))
 
-            if total_score >= 60: risk_label = "위험"
+            if total_score >= 80: risk_label = "위험"
+            elif total_score >= 60: risk_label = "경고"
             elif total_score >= 35: risk_label = "주의"
             else: risk_label = "안전"
 
