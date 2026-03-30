@@ -30,6 +30,8 @@ let kmaShortApiKey = ""; // 단기예보 API 키
 let kmaMidApiKey = ""; // 중기예보 API 키
 let aiForecastData = null; // AI 예측 데이터 (Python 연동)
 let excelSafeData = []; // 엑셀에서 업로드된 안전 데이터
+let currentSettings = {}; // [신규] 시스템 설정 값 객체
+let recipientEmails = []; // [신규] 수신 이메일 목록
 
 // ========== 3. DOM 요소 참조 ==========
 const elements = {
@@ -1671,6 +1673,11 @@ function init() {
             }
         });
 
+        db.ref('settings').on('value', snapshot => {
+            currentSettings = snapshot.val() || {};
+            console.log('⚙️ 시스템 설정을 최신 데이터로 업데이트했습니다.');
+        });
+
         // 기상청 API 키 설정 가져오기 (단기예보 + 중기예보)
         db.ref('settings/kma_short_api_key').on('value', snapshot => {
             const val = snapshot.val();
@@ -1735,6 +1742,7 @@ function init() {
         monitoringLogs = JSON.parse(localStorage.getItem('seah_logs')) || [];
         allReports = JSON.parse(localStorage.getItem('seah_all_reports')) || {};
         latestLocationStatus = JSON.parse(localStorage.getItem('seah_location_status')) || {};
+        excelSafeData = JSON.parse(localStorage.getItem('seah_excel_safe_data')) || [];
 
         renderLogs();
         renderLocationSummary();
@@ -2279,8 +2287,14 @@ function displayWeeklyForecast(forecast) {
                     finalScore = 30 + Math.floor(Math.random() * 30);
                 }
             } else {
-                // [추가] 안전 단계에서도 0 ~ 30점 사이의 점수 표시
-                finalScore = 5 + Math.floor(Math.random() * 20);
+                // [개선] 점수 표시 (고온기/여름철에는 더 낮은 점수 부여)
+                const month = d.getMonth() + 1;
+                const isWinter = (month >= 11 || month <= 3);
+                if (day.maxTemp > 20 || (!isWinter && day.maxTemp > 15)) {
+                    finalScore = Math.floor(Math.random() * 8); // 0~7점 (매우 안전)
+                } else {
+                    finalScore = 5 + Math.floor(Math.random() * 20);
+                }
             }
         }
 
@@ -2660,6 +2674,11 @@ function openSettingModal() {
         alert('관리자만 접근할 수 있습니다.');
         return;
     }
+    // 데이터 파싱 및 리스트 초기화
+    const rawEmails = currentSettings.admin_email || '';
+    recipientEmails = rawEmails ? rawEmails.replace(/;/g, ',').split(',').map(s => s.trim()).filter(s => s) : [];
+
+    renderRecipients();
     document.getElementById('setting-modal').style.display = 'block';
 }
 
@@ -2667,10 +2686,60 @@ function closeSettingModal() {
     document.getElementById('setting-modal').style.display = 'none';
 }
 
+function addItemToList(type) {
+    if (type !== 'email') return;
+    const input = document.getElementById('new-admin-email');
+    const value = input.value.trim();
+    
+    if (!value) return;
+
+    if (!value.includes('@')) {
+        alert('유효한 이메일 주소를 입력해주세요.');
+        return;
+    }
+    if (!recipientEmails.includes(value)) recipientEmails.push(value);
+
+    input.value = '';
+    renderRecipients();
+}
+
+function removeRecipient(type, index) {
+    if (type === 'email') {
+        recipientEmails.splice(index, 1);
+    }
+    renderRecipients();
+}
+
+function renderRecipients() {
+    const emailTags = document.getElementById('email-tags');
+
+    if (emailTags) {
+        emailTags.innerHTML = recipientEmails.map((email, idx) => `
+            <div class="recipient-tag">
+                <span>${email}</span>
+                <span class="tag-remove" onclick="removeRecipient('email', ${idx})">&times;</span>
+            </div>
+        `).join('') || '<small class="text-muted">등록된 이메일이 없습니다.</small>';
+    }
+}
+
 function saveSettings() {
-    // 더 이상 브라우저에서 직접 수정하지 않으므로 저장 로직 제거
-    alert('설정 정보는 시스템 관리자(Firebase)를 통해 관리됩니다.');
-    closeSettingModal();
+    const finalEmails = recipientEmails.join(', ');
+
+    if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+        firebase.database().ref('settings').update({
+            admin_email: finalEmails
+        }).then(() => {
+            alert('설정 정보가 성공적으로 저장되었습니다.');
+            closeSettingModal();
+        }).catch(err => {
+            console.error('Save Settings Failed:', err);
+            alert('저장에 실패했습니다. 권한을 확인해주세요.');
+        });
+    } else {
+        alert('Firebase 연결이 필요합니다.');
+        closeSettingModal();
+    }
 }
 
 // ========== 18. 과거 이력 관리 (History) ==========
@@ -2976,6 +3045,20 @@ function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb,
         reason: '정상 범위'
     };
 
+    // [핵심 추가] 고온기 및 비동절기 결로 발생 억제 로직 (사용자 요청 반영)
+    const month = new Date().getMonth() + 1;
+    const isWinterSeason = (month >= 11 || month <= 3);
+    
+    // 외기 온도가 높거나(20도 이상) 동절기가 아닌데 온도가 일정이상(15도)인 경우 고위험 배제
+    if (maxTemp > 20 || (!isWinterSeason && maxTemp > 15)) {
+        // 단, 급격한 기온 상승(Sudden Warming) 패턴이 감지된 경우에만 주의 유지 가능
+        if (tempJump < 10 && currentAvgHum < 85) {
+            status.risk = '안전';
+            status.reason = maxTemp > 20 ? `고온기(${maxTemp}℃) 영향 결로 희박` : `비동절기(${month}월) 정상 범위`;
+            return status;
+        }
+    }
+
     // [빅데이터 매칭] 과거 발생 이력과 현재 예보 데이터 비교
     // [개선] 위험 이력과 안전 이력을 구분하여 분석
     let dangerMatchCount = 0;
@@ -3171,18 +3254,38 @@ async function handleExcelUpload(event) {
                             return;
                         }
 
+                        // 중복 체크용 기존 데이터 키 생성 (Set 사용으로 속도 개선)
+                        const existingKeys = new Set(excelSafeData.map(item => {
+                            const itemTemp = item.outTemp !== undefined ? item.outTemp : item.inTemp;
+                            const itemHum = item.outHumid !== undefined ? item.outHumid : item.inHumid;
+                            const itemType = item.outTemp !== undefined ? 'out' : 'in';
+                            return `${item.dateTime}_${itemTemp}_${itemHum}_${itemType}`;
+                        }));
+                        const currentSessionKeys = new Set(allExtractedData.map(item => {
+                            const itemTemp = item.outTemp !== undefined ? item.outTemp : item.inTemp;
+                            const itemHum = item.outHumid !== undefined ? item.outHumid : item.inHumid;
+                            const itemType = item.outTemp !== undefined ? 'out' : 'in';
+                            return `${item.dateTime}_${itemTemp}_${itemHum}_${itemType}`;
+                        }));
+
                         jsonData.forEach(row => {
                             patternKeys.forEach(pk => {
                                 const valT = parseFloat(row[pk.tKey]);
                                 const valH = parseFloat(row[pk.hKey]);
                                 if (!isNaN(valT) && !isNaN(valH)) {
-                                    allExtractedData.push({
-                                        timestamp: Date.now(),
-                                        dateTime: row['DateTime'] || row['일시'] || row['Date'] || '-',
-                                        fileName: file.name,
-                                        [pk.type === 'out' ? 'outTemp' : 'inTemp']: valT,
-                                        [pk.type === 'out' ? 'outHumid' : 'inHumid']: valH
-                                    });
+                                    const dateTime = row['DateTime'] || row['일시'] || row['Date'] || '-';
+                                    const recordKey = `${dateTime}_${valT}_${valH}_${pk.type}`;
+
+                                    if (!existingKeys.has(recordKey) && !currentSessionKeys.has(recordKey)) {
+                                        allExtractedData.push({
+                                            timestamp: Date.now(),
+                                            dateTime: dateTime,
+                                            fileName: file.name,
+                                            [pk.type === 'out' ? 'outTemp' : 'inTemp']: valT,
+                                            [pk.type === 'out' ? 'outHumid' : 'inHumid']: valH
+                                        });
+                                        currentSessionKeys.add(recordKey);
+                                    }
                                 }
                             });
                         });
@@ -3211,7 +3314,7 @@ async function handleExcelUpload(event) {
         console.log('Extraction complete. Total items:', allExtractedData.length);
 
         if (allExtractedData.length === 0) {
-            alert('유효한 데이터를 찾을 수 없습니다.');
+            alert('업로드할 새로운 데이터가 없습니다. (전부 중복이거나 유효하지 않음)');
             if (uploadBtn) {
                 uploadBtn.textContent = originalText;
                 uploadBtn.disabled = false;
@@ -3219,7 +3322,7 @@ async function handleExcelUpload(event) {
             return;
         }
 
-        if (confirm(`${files.length}개 파일에서 ${allExtractedData.length}건을 추출했습니다.\n학습시키겠습니까?`)) {
+        if (confirm(`${files.length}개 파일에서 신규 데이터 ${allExtractedData.length}건을 추출했습니다.\n(중복된 데이터는 자동으로 필터링되었습니다.)\n\n학습시키겠습니까?`)) {
             if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
 
                 const dbRef = firebase.database().ref('excelSafeData');
@@ -3267,4 +3370,24 @@ async function handleExcelUpload(event) {
         }
         event.target.value = '';
     }
+}
+
+// ========== 20. 초기화 및 실시간 데이터 바인딩 ==========
+if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
+    // 시스템 설정 (이메일 등) 및 API 키 실시간 수신
+    firebase.database().ref('settings').on('value', (snapshot) => {
+        currentSettings = snapshot.val() || {};
+        if (currentSettings.kma_short_api_key) kmaShortApiKey = currentSettings.kma_short_api_key;
+        if (currentSettings.kma_mid_api_key) kmaMidApiKey = currentSettings.kma_mid_api_key;
+        console.log('Firebase settings synchronized.');
+    });
+
+    // 결로 이력 데이터 실시간 수신
+    firebase.database().ref('excelSafeData').on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            excelSafeData = Object.keys(data).map(key => ({ ...data[key], fbKey: key }));
+            updateCondensationHistory();
+        }
+    });
 }

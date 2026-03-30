@@ -2,6 +2,9 @@ import requests
 import json
 import datetime
 import math
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 import pandas as pd
 from typing import List, Dict
 
@@ -82,8 +85,6 @@ class CondensationAIPredictor:
                 out_h = d.get('outHumid')
                 if out_t is not None and out_h is not None:
                     safe_cases.append({'out_t': float(out_t), 'out_h': float(out_h)})
-                # 내부 데이터만 있는 경우, 일단 로그 수집에 포함시킬 수 있으나
-                # 주간 예보(실외 예보 기반)에서는 영향력이 제한적임
 
         if danger_cases:
             self.danger_patterns = pd.DataFrame(danger_cases)
@@ -122,26 +123,97 @@ class CondensationAIPredictor:
 
         # 위험/안전 비율 기반 점수 조정
         if danger_score > 0 and close_safe > 0:
-            # 가까운 위험 사례와 안전 사례 비율로 점수 조정
-            close_danger_count = (self.danger_patterns.apply(
-                lambda x: math.sqrt((x['out_t'] - temp_max)**2 + ((x['out_h'] - humidity)/5)**2), axis=1
-            ) < threshold_close).sum() if not self.danger_patterns.empty else 0
-
-            total = close_danger_count + close_safe
-            danger_ratio = close_danger_count / total if total > 0 else 0
+            total = close_danger + close_safe
+            danger_ratio = close_danger / total if total > 0 else 0
 
             if danger_ratio <= 0.3:
-                # 안전 사례가 압도적 → 이력 점수 대폭 감소
                 danger_score = max(0, int(danger_score * 0.2))
             elif danger_ratio <= 0.6:
-                # 비등 → 이력 점수 절반
                 danger_score = int(danger_score * 0.5)
-            # 0.6 초과 → 위험 유지 (감소 없음)
         elif close_safe > 0 and danger_score == 0:
-            # 안전 사례만 있는 경우 → 점수 차감 (안전 바이어스)
             danger_score = max(-15, -close_safe * 5)
 
         return danger_score
+
+    def send_notifications(self, predictions):
+        """[신규] 경고 발생 시 다수의 관리자에게 이메일 및 문자 통보"""
+    def send_notifications(self, predictions):
+        today_dt = datetime.datetime.now()
+        month = today_dt.month
+        
+        # [핵심] 11월 ~ 3월이 아니면 알람 발송 스킵 (사용자 요청)
+        if not (month >= 11 or month <= 3):
+            print(f"🍂 현재 {month}월은 비동절기이므로 알림 발송을 스킵합니다. (11월~3월만 발송)")
+            return
+
+        settings = self.fetch_firebase("settings")
+        # 쉼표(,) 또는 세미콜론(;)으로 구분된 원시 데이터 가져오기
+        admin_email_raw = settings.get('admin_email', '')
+        notify_enabled = settings.get('notify_enabled', True)
+        last_notified = settings.get('last_notified_date', '')
+        
+        today = today_dt.strftime('%Y-%m-%d')
+        if last_notified == today or not notify_enabled:
+            return
+
+        # D+7 전체 주간 예보 중 경고/위험 데이터 필터링 (최우선순위 리포트)
+        high_risk_days = [p for p in predictions if p['risk'] in ['위험', '경고']]
+        
+        if high_risk_days:
+            # 메시지 구성 (가독성 강화 버전)
+            title = "[세아씨엠] 🔔 결로 위험 감지 알림 리포트"
+            
+            content = "🔔 [세아씨엠] 결로 위험 감지 알림\n"
+            content += "============================\n\n"
+            content += "주간 예보 분석 결과,\n결로 발생 위험이 감지되었습니다.\n\n"
+            
+            for d in high_risk_days:
+                content += f"📍 예상 날짜: {d['date']}\n"
+                content += f"⚠️ 위험 수준: {d['risk']} ({d['score']}점)\n"
+                content += f"🌡️ 예상 기온: 최저 {d['temp_min']}℃ / 최고 {d['temp_max']}℃\n"
+                content += f"💧 예상 습도: {d['humidity']}%\n"
+                content += f"🔍 분석 사유: {d['reason']}\n"
+                content += "----------------------------\n\n"
+            
+            content += "🔗 실시간 현황 확인하기:\n"
+            content += "https://seahcm-dashboard.web.app\n\n"
+            content += "※ AI 예측 엔진 기반 자동 발송"
+
+            # 1. 다중 이메일 발송 (사용자 요청에 따라 SMS 제외)
+            email_list = []
+            if admin_email_raw:
+                # 쉼표나 세미콜론으로 분리하여 리스트화
+                email_list = [e.strip() for e in str(admin_email_raw).replace(';', ',').split(',') if e.strip()]
+                for to_email in email_list:
+                    self._send_email(to_email, title, content, settings)
+            
+            # 발송 기록 업데이트
+            self.push_firebase("settings/last_notified_date", today)
+            print(f"🚀 총 {len(email_list)}명에게 상세 이메일 알림을 발송했습니다.")
+
+    def _send_email(self, to_email, title, body, settings):
+        try:
+            smtp_host = settings.get('smtp_host', 'smtp.gmail.com')
+            smtp_port = int(settings.get('smtp_port', 465))
+            smtp_user = settings.get('smtp_user', '')
+            smtp_pass = str(settings.get('smtp_pass', '')).replace(' ', '')
+
+            if not smtp_user or not smtp_pass:
+                print("⚠️ SMTP 계정 정보가 없어 이메일을 발송하지 못했습니다.")
+                return
+
+            msg = MIMEMultipart()
+            msg['From'] = smtp_user
+            msg['To'] = to_email
+            msg['Subject'] = title
+            msg.attach(MIMEText(body, 'plain'))
+
+            with smtplib.SMTP_SSL(smtp_host, smtp_port) as server:
+                server.login(smtp_user, smtp_pass)
+                server.send_message(msg)
+            print(f"📧 이메일 발송 완료: {to_email}")
+        except Exception as e:
+            print(f"❌ 이메일 발송 실패: {str(e)}")
 
     def run_prediction(self):
         self.analyze_history()
@@ -153,60 +225,56 @@ class CondensationAIPredictor:
         predictions = []
         for day in forecast_list:
             d_raw = day.get('date', '')
-            
-            # 타임스탬프 처리 (숫자 형태인 경우)
             try:
                 if isinstance(d_raw, (int, float)):
                     dt = datetime.datetime.fromtimestamp(d_raw / 1000.0)
                 else:
                     dt_str = str(d_raw).split(' ')[0]
                     dt = datetime.datetime.strptime(dt_str, '%Y-%m-%d')
-                
                 date_str = dt.strftime('%Y-%m-%d')
-            except:
-                continue
+            except: continue
             
             temp_max = float(day.get('maxTemp', 0))
+            temp_min = float(day.get('minTemp', 0))
             humidity = float(day.get('humidity', 0))
-            
-            # 기본 물리적 점수
             p_score = 30 if humidity >= 80 else 10
-
-            # [개선] 위험/안전 이력 비율 기반 점수
             h_score = self._calc_history_score(temp_max, humidity)
-            
+
+            # [핵심 추가] 계절 및 온도 보정 (사용자 요청: 고온기/비동절기 결로 억제)
+            month = dt.month
+            is_winter = (month >= 11 or month <= 3)
+            if temp_max > 20 or (not is_winter and temp_max > 15):
+                p_score = max(0, p_score - 20)
+                h_score = h_score * 0.3 if h_score > 0 else h_score
+
             total_score = max(0, min(99, p_score + h_score))
 
-            # 리스크 레벨 결정
-            if total_score >= 60:
-                risk_label = "위험"
-            elif total_score >= 35:
-                risk_label = "주의"
-            else:
-                risk_label = "안전"
+            if total_score >= 60: risk_label = "위험"
+            elif total_score >= 35: risk_label = "주의"
+            else: risk_label = "안전"
 
-            # [개선] 안전 이력 반영 여부를 reason에 표시
-            safe_count = 0
-            if not self.safe_patterns.empty:
-                safe_dist = self.safe_patterns.apply(
-                    lambda x: math.sqrt((x['out_t'] - temp_max)**2 + ((x['out_h'] - humidity)/5)**2), axis=1
-                )
-                safe_count = (safe_dist < 3.0).sum()
-
-            reason = f"AI 분석 {int(total_score)}점"
-            if safe_count > 0:
-                reason += f" (유사조건 안전 {safe_count}건 반영)"
+            # [개선] 발생 원인(Reason) 상세 구성
+            causes = []
+            if humidity >= 80: causes.append("지속적 고습도")
+            if h_score >= 40: causes.append("과거 위험 사례와 높은 유사성")
+            elif h_score > 10: causes.append("유사 위험 패턴 감지")
+            if not is_winter and temp_max < 10: causes.append("비동절기 이상 저온")
+            
+            reason_str = ", ".join(causes) if causes else "기상 데이터 복합 요인"
 
             predictions.append({
                 'date': date_str,
                 'score': int(total_score),
                 'risk': risk_label,
-                'reason': reason
+                'temp_max': temp_max,
+                'temp_min': temp_min,
+                'humidity': humidity,
+                'reason': reason_str
             })
         
         self.push_firebase("aiWeeklyForecast", predictions)
+        self.send_notifications(predictions)
         print("--- AI Predictions Finalized ---")
-        for p in predictions[:3]: print(f"Date: {p['date']}, Score: {p['score']}, Risk: {p['risk']}")
 
 if __name__ == "__main__":
     CondensationAIPredictor(FIREBASE_URL).run_prediction()

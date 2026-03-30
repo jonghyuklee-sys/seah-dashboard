@@ -60,12 +60,26 @@
                 <span class="close-btn" onclick="closeSettingModal()">&times;</span>
             </div>
             <div class="modal-body">
-                <div class="setting-group" style="text-align: center; padding: 20px 0;">
-                    <p>기상청 API 키 및 주요 시스템 설정은 <br><strong>Firebase 콘솔</strong>에서 직접 관리됩니다.</p>
-                    <small class="text-muted">보안을 위해 앱 내 수정 기능을 비활성화하였습니다.</small>
+                <div class="setting-group">
+                    <label>🚨 알림 수신 설정</label>
+                    <p class="text-muted mb-sm" style="font-size: 0.82rem;">'경고' 이상의 위험 예보 시 등록된 모든 인원에게 알람을 보냅니다.</p>
+                    
+                    <!-- 이메일 관리 -->
+                    <div class="recipient-section">
+                        <label style="font-size: 0.8rem; color: var(--seah-blue);">수신 이메일 목록</label>
+                        <div id="email-tags" class="tag-container"></div>
+                        <div style="display: flex; gap: 6px;">
+                            <input type="email" id="new-admin-email" class="input-field" placeholder="이메일 추가 (예: a@co.kr)" style="flex: 1;">
+                            <button type="button" onclick="addItemToList('email')" class="btn-primary-mini" style="width: 50px; padding: 0;">추가</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="setting-group mt-md" style="border-top: 1px dashed #eee; padding-top: 15px;">
+                    <p style="font-size: 0.8rem; color: #666;">※ 기상청 API 키 및 시스템 핵심 설정은 보안을 위해 Firebase 콘솔에서 직접 관리됩니다.</p>
                 </div>
                 <div class="setting-actions">
-                    <button class="btn-primary" onclick="closeSettingModal()">확인</button>
+                    <button class="btn-secondary" onclick="closeSettingModal()">취소</button>
+                    <button class="btn-primary" onclick="saveSettings()">저장하기</button>
                 </div>
             </div>
         </div>
