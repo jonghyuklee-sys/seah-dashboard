@@ -2287,13 +2287,17 @@ function displayWeeklyForecast(forecast) {
                     finalScore = 30 + Math.floor(Math.random() * 30);
                 }
             } else {
-                // [개선] 점수 표시 (고온기/여름철에는 더 낮은 점수 부여)
-                const month = d.getMonth() + 1;
-                const isWinter = (month >= 11 || month <= 3);
-                if (day.maxTemp > 20 || (!isWinter && day.maxTemp > 15)) {
-                    finalScore = Math.floor(Math.random() * 8); // 0~7점 (매우 안전)
+                // [개선] 계절 제한 제거 - 전 과정 감시 (사용자 요청)
+                // 단, 하절기 정오 기온이 25도를 넘는 경우만 물리적 특성 고려 보정
+                if (day.maxTemp > 25) {
+                    if (day.humidity >= 85) {
+                        finalScore = 25 + Math.floor(Math.random() * 15); // 고온다습 주의
+                    } else {
+                        finalScore = Math.floor(Math.random() * 8); // 고온건조 안전
+                    }
                 } else {
-                    finalScore = 5 + Math.floor(Math.random() * 20);
+                    // 25도 이하 구간은 습도 및 기상 패턴에만 집중
+                    finalScore = 15 + Math.floor(Math.random() * 20);
                 }
             }
         }
@@ -2801,6 +2805,7 @@ function openPastRecordModal(editId = null) {
             dateInput.value = log.time.replace(' ', 'T').slice(0, 16);
             locSelect.value = log.location;
             document.getElementById('past-outdoor').value = log.outdoorTemp || (typeof log.outdoor === 'string' ? parseFloat(log.outdoor) : '');
+            document.getElementById('past-prev-min').value = log.prevMinTemp || "";
             document.getElementById('past-outdoor-humid').value = log.outdoorHum || "";
             document.getElementById('past-steel').value = log.steel;
             document.getElementById('past-indoor').value = log.temp;
@@ -2817,6 +2822,7 @@ function openPastRecordModal(editId = null) {
         dateInput.value = localIso;
 
         document.getElementById('past-outdoor').value = '';
+        document.getElementById('past-prev-min').value = '';
         document.getElementById('past-outdoor-humid').value = '';
         document.getElementById('past-steel').value = '';
         document.getElementById('past-indoor').value = '';
@@ -2836,6 +2842,7 @@ function savePastRecord() {
     const dateStr = document.getElementById('past-date').value;
     const location = document.getElementById('past-location').value;
     const outdoor = parseFloat(document.getElementById('past-outdoor').value);
+    const prevMin = parseFloat(document.getElementById('past-prev-min').value);
     const outdoorHum = parseFloat(document.getElementById('past-outdoor-humid').value);
     const steel = parseFloat(document.getElementById('past-steel').value);
     const indoor = parseFloat(document.getElementById('past-indoor').value);
@@ -2878,6 +2885,8 @@ function savePastRecord() {
         humidity: humid,
         outdoor: `${outdoor}°C / ${isNaN(outdoorHum) ? '-' : outdoorHum}%`,
         outdoorTemp: outdoor,
+        prevMinTemp: isNaN(prevMin) ? null : prevMin,
+        tempRise: isNaN(prevMin) ? 0 : (outdoor - prevMin).toFixed(1),
         outdoorHum: isNaN(outdoorHum) ? 0 : outdoorHum,
         steel: steel,
         dp: dpFixed,
@@ -3045,16 +3054,13 @@ function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb,
         reason: '정상 범위'
     };
 
-    // [핵심 추가] 고온기 및 비동절기 결로 발생 억제 로직 (사용자 요청 반영)
-    const month = new Date().getMonth() + 1;
-    const isWinterSeason = (month >= 11 || month <= 3);
-    
-    // 외기 온도가 높거나(20도 이상) 동절기가 아닌데 온도가 일정이상(15도)인 경우 고위험 배제
-    if (maxTemp > 20 || (!isWinterSeason && maxTemp > 15)) {
-        // 단, 급격한 기온 상승(Sudden Warming) 패턴이 감지된 경우에만 주의 유지 가능
+    // [핵심 수정] 모든 날짜에 대해 연중무휴 감시 수행 (동절기 제한 제거)
+    // 외기 온도가 25도 이상인 완전한 하절기 낮 기온 상황에 대해서만 보정 적용
+    if (maxTemp > 25) {
+        // 단, 습도가 극도로 높거나(85% 이상) 급격한 기온 상승 패턴이 감지된 경우 제외
         if (tempJump < 10 && currentAvgHum < 85) {
             status.risk = '안전';
-            status.reason = maxTemp > 20 ? `고온기(${maxTemp}℃) 영향 결로 희박` : `비동절기(${month}월) 정상 범위`;
+            status.reason = `하절기 고온(${maxTemp}℃) 영향 결로 희박`;
             return status;
         }
     }

@@ -44,10 +44,18 @@ class CondensationAIPredictor:
                     continue
 
                 if log.get('risk') == '위험' or log.get('product') == '결로 인지' or log.get('source') == 'manual_history':
-                    danger_cases.append({'out_t': out_t, 'out_h': out_h})
+                    danger_cases.append({
+                        'out_t': out_t, 
+                        'out_h': out_h,
+                        'temp_rise': float(log.get('tempRise', 0))
+                    })
                 elif log.get('risk') == '안전':
                     # [핵심 개선] 안전 건도 수집
-                    safe_cases.append({'out_t': out_t, 'out_h': out_h})
+                    safe_cases.append({
+                        'out_t': out_t, 
+                        'out_h': out_h,
+                        'temp_rise': float(log.get('tempRise', 0))
+                    })
 
         # 보고서에서 수집
         if isinstance(reports, dict):
@@ -93,17 +101,21 @@ class CondensationAIPredictor:
 
         print(f"📊 이력 분석 완료 - 위험 사례: {len(danger_cases)}건, 안전 사례: {len(safe_cases)}건 (엑셀 포함)")
 
-    def _calc_history_score(self, temp_max, humidity):
-        """[개선] 위험/안전 이력 비율을 기반으로 균형 잡힌 이력 점수 산출"""
+    def _calc_history_score(self, temp_max, humidity, temp_jump=0):
+        """[개선] 위험/안전 이력 비율 및 기온 상승폭(temp_jump)을 기반으로 정밀 이력 점수 산출"""
         danger_score = 0
         safe_score = 0
         threshold_close = 3.0
         threshold_far = 8.0
 
-        # 위험 이력과의 거리 계산
+        # 위험 이력과의 거리 계산 (기온, 습도, 그리고 기온 상승폭 포함)
         if not self.danger_patterns.empty:
             danger_dist = self.danger_patterns.apply(
-                lambda x: math.sqrt((x['out_t'] - temp_max)**2 + ((x['out_h'] - humidity)/5)**2), axis=1
+                lambda x: math.sqrt(
+                    (x['out_t'] - temp_max)**2 + 
+                    ((x['out_h'] - humidity)/5)**2 + 
+                    (x['temp_rise'] - temp_jump)**2
+                ), axis=1
             )
             # 가까운 위험 사례 개수
             close_danger = (danger_dist < threshold_close).sum()
@@ -117,7 +129,11 @@ class CondensationAIPredictor:
         close_safe = 0
         if not self.safe_patterns.empty:
             safe_dist = self.safe_patterns.apply(
-                lambda x: math.sqrt((x['out_t'] - temp_max)**2 + ((x['out_h'] - humidity)/5)**2), axis=1
+                lambda x: math.sqrt(
+                    (x['out_t'] - temp_max)**2 + 
+                    ((x['out_h'] - humidity)/5)**2 +
+                    (x['temp_rise'] - temp_jump)**2
+                ), axis=1
             )
             close_safe = (safe_dist < threshold_close).sum()
 
@@ -137,15 +153,10 @@ class CondensationAIPredictor:
 
     def send_notifications(self, predictions):
         """[신규] 경고 발생 시 다수의 관리자에게 이메일 및 문자 통보"""
-    def send_notifications(self, predictions):
         today_dt = datetime.datetime.now()
-        month = today_dt.month
         
-        # [핵심] 11월 ~ 3월이 아니면 알람 발송 스킵 (사용자 요청)
-        if not (month >= 11 or month <= 3):
-            print(f"🍂 현재 {month}월은 비동절기이므로 알림 발송을 스킵합니다. (11월~3월만 발송)")
-            return
-
+        # [핵심] 모든 날짜에 대해 알림 발송 가능하도록 수정 (사용자 요청)
+        # 이전에는 11월~4월 동절기 제한이 있었으나 제거함
         settings = self.fetch_firebase("settings")
         # 쉼표(,) 또는 세미콜론(;)으로 구분된 원시 데이터 가져오기
         admin_email_raw = settings.get('admin_email', '')
@@ -237,15 +248,24 @@ class CondensationAIPredictor:
             temp_max = float(day.get('maxTemp', 0))
             temp_min = float(day.get('minTemp', 0))
             humidity = float(day.get('humidity', 0))
+            # 전일 최저 대비 기온 상승폭 계산
+            web_forecast_item = next((f for f in forecast_list if f.get('dateStr') == date_str), {})
+            temp_jump = float(web_forecast_item.get('tempJump', 0)) if web_forecast_item else 0
+            
             p_score = 30 if humidity >= 80 else 10
-            h_score = self._calc_history_score(temp_max, humidity)
+            h_score = self._calc_history_score(temp_max, humidity, temp_jump)
 
-            # [핵심 추가] 계절 및 온도 보정 (사용자 요청: 고온기/비동절기 결로 억제)
-            month = dt.month
-            is_winter = (month >= 11 or month <= 3)
-            if temp_max > 20 or (not is_winter and temp_max > 15):
-                p_score = max(0, p_score - 20)
-                h_score = h_score * 0.3 if h_score > 0 else h_score
+            # [핵심 수정] 계절 제한 제거 - 모든 날짜 감시 (전일 최저 대비 상승폭 및 습도 중심)
+            # 단, 외온이 25도 이상인 완전한 하절기 고온 상황에서는 물리적 특성을 고려해 보정
+            if temp_max > 25:
+                # 습도가 아주 높지 않으면(80% 미만) 고온기 결로 발생 가능성 배제
+                if humidity < 80:
+                    p_score = max(0, p_score - 20)
+                    h_score = h_score * 0.3 if h_score > 0 else h_score
+                else:
+                    # 고온 고습 상황 (여름철 장마 등)은 주의 수준 유지
+                    p_score = max(10, p_score - 10)
+                    h_score = h_score * 0.5 if h_score > 0 else h_score
 
             total_score = max(0, min(99, p_score + h_score))
 

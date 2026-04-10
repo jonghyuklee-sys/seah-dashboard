@@ -525,26 +525,32 @@
                 <div class="input-row">
                     <div class="input-group">
                         <label>당시 외기온도 (℃)</label>
-                        <input type="number" id="past-outdoor" class="input-field" step="0.1" placeholder="예: -2.5">
+                        <input type="number" id="past-outdoor" class="input-field" step="0.1" placeholder="예: 15.0">
                     </div>
                     <div class="input-group">
-                        <label>당시 외기습도 (%)</label>
-                        <input type="number" id="past-outdoor-humid" class="input-field" step="1" placeholder="예: 85">
+                        <label>전일 최저기온 (℃) [선택]</label>
+                        <input type="number" id="past-prev-min" class="input-field" step="0.1" placeholder="예: 3.0">
                     </div>
                 </div>
                 <div class="input-row">
                     <div class="input-group">
+                        <label>당시 외기습도 (%)</label>
+                        <input type="number" id="past-outdoor-humid" class="input-field" step="1" placeholder="예: 85">
+                    </div>
+                    <div class="input-group">
                         <label>강판온도 (℃)</label>
                         <input type="number" id="past-steel" class="input-field" step="0.1">
                     </div>
+                </div>
+                <div class="input-row">
                     <div class="input-group">
                         <label>실내온도 (℃)</label>
                         <input type="number" id="past-indoor" class="input-field" step="0.1">
                     </div>
-                </div>
-                <div class="input-group">
-                    <label>실내습도 (%)</label>
-                    <input type="number" id="past-humid" class="input-field" step="1">
+                    <div class="input-group">
+                        <label>실내습도 (%)</label>
+                        <input type="number" id="past-humid" class="input-field" step="1">
+                    </div>
                 </div>
                 <input type="hidden" id="past-record-id">
                 <div class="setting-actions">
