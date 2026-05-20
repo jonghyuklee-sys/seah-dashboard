@@ -14,7 +14,6 @@ class CondensationAIPredictor:
     def __init__(self, firebase_url):
         self.db_url = firebase_url
         self.danger_patterns = pd.DataFrame()  # 결로 발생 이력
-        self.safe_patterns = pd.DataFrame()    # [개선] 결로 미발생 이력
 
     def fetch_firebase(self, node):
         try:
@@ -26,11 +25,10 @@ class CondensationAIPredictor:
         requests.put(f"{self.db_url}/{node}.json", json=data)
 
     def analyze_history(self):
-        """[개선] 결로 발생 이력과 미발생 이력을 모두 분석하여 균형 잡힌 예측 수행"""
+        """결로 발생 실제 이력을 분석하여 예측 수행"""
         logs = self.fetch_firebase("logs")
         reports = self.fetch_firebase("reports")
         danger_cases = []
-        safe_cases = []
 
         # 로그에서 수집
         if isinstance(logs, dict):
@@ -45,13 +43,6 @@ class CondensationAIPredictor:
 
                 if log.get('risk') == '위험' or log.get('product') == '결로 인지' or log.get('source') == 'manual_history':
                     danger_cases.append({
-                        'out_t': out_t, 
-                        'out_h': out_h,
-                        'temp_rise': float(log.get('tempRise', 0))
-                    })
-                elif log.get('risk') == '안전':
-                    # [핵심 개선] 안전 건도 수집
-                    safe_cases.append({
                         'out_t': out_t, 
                         'out_h': out_h,
                         'temp_rise': float(log.get('tempRise', 0))
@@ -78,38 +69,25 @@ class CondensationAIPredictor:
                             if isinstance(loc, dict)
                         )
                         if has_condensation:
-                            danger_cases.append({'out_t': out_t, 'out_h': out_h})
-                        else:
-                            # [핵심 개선] 결로 미발생 건도 수집
-                            safe_cases.append({'out_t': out_t, 'out_h': out_h})
-
-        # 엑셀 업로드 데이터에서 수집
-        excel_safe = self.fetch_firebase("excelSafeData")
-        if isinstance(excel_safe, dict):
-            for d in excel_safe.values():
-                if not isinstance(d, dict): continue
-                # Python 예측기는 주로 실외 데이터(maxTemp)와 매칭하므로 outTemp가 있는 것을 우선 활용
-                out_t = d.get('outTemp')
-                out_h = d.get('outHumid')
-                if out_t is not None and out_h is not None:
-                    safe_cases.append({'out_t': float(out_t), 'out_h': float(out_h)})
+                            danger_cases.append({'out_t': out_t, 'out_h': out_h, 'temp_rise': 0.0})
 
         if danger_cases:
             self.danger_patterns = pd.DataFrame(danger_cases)
-        if safe_cases:
-            self.safe_patterns = pd.DataFrame(safe_cases)
 
-        print(f"📊 이력 분석 완료 - 위험 사례: {len(danger_cases)}건, 안전 사례: {len(safe_cases)}건 (엑셀 포함)")
+        print(f"📊 이력 분석 완료 - 위험 사례: {len(danger_cases)}건")
 
     def _calc_history_score(self, temp_max, humidity, temp_jump=0):
-        """[개선] 위험/안전 이력 비율 및 기온 상승폭(temp_jump)을 기반으로 정밀 이력 점수 산출"""
+        """위험 이력 및 기온 상승폭(temp_jump)을 기반으로 정밀 이력 점수 산출"""
         danger_score = 0
-        safe_score = 0
         threshold_close = 3.0
         threshold_far = 8.0
 
         # 위험 이력과의 거리 계산 (기온, 습도, 그리고 기온 상승폭 포함)
         if not self.danger_patterns.empty:
+            # temp_rise 컬럼이 없을 경우를 대비한 방어 코드
+            if 'temp_rise' not in self.danger_patterns.columns:
+                self.danger_patterns['temp_rise'] = 0.0
+
             danger_dist = self.danger_patterns.apply(
                 lambda x: math.sqrt(
                     (x['out_t'] - temp_max)**2 + 
@@ -124,30 +102,6 @@ class CondensationAIPredictor:
                 danger_score = 65
             elif mid_danger > 0:
                 danger_score = 40
-
-        # [핵심 개선] 안전 이력과의 거리 계산
-        close_safe = 0
-        if not self.safe_patterns.empty:
-            safe_dist = self.safe_patterns.apply(
-                lambda x: math.sqrt(
-                    (x['out_t'] - temp_max)**2 + 
-                    ((x['out_h'] - humidity)/5)**2 +
-                    (x['temp_rise'] - temp_jump)**2
-                ), axis=1
-            )
-            close_safe = (safe_dist < threshold_close).sum()
-
-        # 위험/안전 비율 기반 점수 조정
-        if danger_score > 0 and close_safe > 0:
-            total = close_danger + close_safe
-            danger_ratio = close_danger / total if total > 0 else 0
-
-            if danger_ratio <= 0.3:
-                danger_score = max(0, int(danger_score * 0.2))
-            elif danger_ratio <= 0.6:
-                danger_score = int(danger_score * 0.5)
-        elif close_safe > 0 and danger_score == 0:
-            danger_score = max(-15, -close_safe * 5)
 
         return danger_score
 
@@ -243,6 +197,8 @@ class CondensationAIPredictor:
                     dt_str = str(d_raw).split(' ')[0]
                     dt = datetime.datetime.strptime(dt_str, '%Y-%m-%d')
                 date_str = dt.strftime('%Y-%m-%d')
+                month = dt.month
+                is_winter = (month >= 11 or month <= 3)
             except: continue
             
             temp_max = float(day.get('maxTemp', 0))

@@ -825,12 +825,11 @@ h3 {
 .status-list {
     margin-top: var(--spacing-sm);
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 20px;
-    /* 항목 간 간격 확대 */
+    grid-template-columns: repeat(5, 1fr);
+    gap: 15px;
+    /* 항목 간 간격 조정 */
     width: 100%;
     /* 너비 제한을 풀고 전체 공간 사용 */
-    /* 전체 너비를 약 15% 늘려 가독성 확보 */
 }
 
 .status-item {
@@ -1419,7 +1418,7 @@ body.is-admin .header-inputs.admin-only {
 /* 결로 분석 통계 카드 스타일 고도화 */
 .analysis-stats-container {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 15px;
     margin: 25px auto 40px auto;
     max-width: 1600px;
@@ -1627,9 +1626,9 @@ body.is-admin .header-inputs.admin-only {
 }
 
 .calendar-day {
-    padding: 4px;
-    height: 80px;
-    /* 기존 52px에서 80px로 확대하여 캘린더 높이 증가 */
+    padding: 2px 4px;
+    height: 50px;
+    /* 80px에서 50px로 축소하여 캘린더 전체 높이 조정 */
     border-bottom: 1px solid #eee;
     border-right: 1px solid #eee;
     cursor: pointer;
@@ -1675,8 +1674,8 @@ body.is-admin .header-inputs.admin-only {
     display: flex;
     flex-direction: column;
     /* Stacked for better readability */
-    gap: 3px;
-    margin-top: 4px;
+    gap: 2px;
+    margin-top: 2px;
 }
 
 .mini-badge {
@@ -1710,14 +1709,6 @@ body.is-admin .header-inputs.admin-only {
     font-size: 0.8rem;
 }
 
-.obs-tag {
-    font-size: 0.65rem;
-    color: var(--seah-blue);
-    font-weight: 800;
-    margin-top: 4px;
-    display: block;
-    letter-spacing: -0.02em;
-}
 
 @media (max-width: 1400px) {
     .dashboard-grid {
@@ -3199,7 +3190,7 @@ body.is-admin .header-inputs.admin-only {
     /* ===== 분석 통계 카드 모바일 ===== */
     .analysis-stats-container {
         display: grid;
-        grid-template-columns: repeat(5, 1fr);
+        grid-template-columns: repeat(4, 1fr);
         gap: 10px;
         margin: 15px 0 !important;
     }

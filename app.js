@@ -8,10 +8,9 @@ const CONFIG = {
 };
 
 const WAREHOUSE_LOCATIONS = [
-    "1CCL 원자재동", "1CCL 제품창고",
-    "2CCL 원자재동", "2CCL 제품창고",
-    "3CCL 원자재동", "3CCL 제품창고",
-    "CGL 제품창고", "SSCL 제품창고"
+    "1CCL 내부", "1CCL 외부",
+    "2CCL 내부", "3CCL 내부",
+    "SSCL 외부"
 ];
 
 // ========== 2. 전역 상태 ==========
@@ -29,7 +28,6 @@ const historyItemsPerPage = 10; // 결로 이력 페이지당 항목 수
 let kmaShortApiKey = ""; // 단기예보 API 키
 let kmaMidApiKey = ""; // 중기예보 API 키
 let aiForecastData = null; // AI 예측 데이터 (Python 연동)
-let excelSafeData = []; // 엑셀에서 업로드된 안전 데이터
 let currentSettings = {}; // [신규] 시스템 설정 값 객체
 let recipientEmails = []; // [신규] 수신 이메일 목록
 
@@ -77,13 +75,11 @@ function calculateDewPoint(T, RH) {
 }
 
 function getRiskLevel(tempDiff, humidity, outdoorTemp = null, outdoorHum = null) {
-    // 1. 과거 사례 매칭 (AI 로직 연동) - [개선] 안전 사례도 함께 비교
+    // 1. 과거 사례 매칭 (위험 이력만 비교)
     let dangerMatch = null;
-    let safeMatchCount = 0;
     let dangerMatchCount = 0;
     const historyResult = getCondensationHistoryForAlgorithm();
     const dangerData = historyResult.danger || historyResult || [];
-    const safeData = historyResult.safe || [];
 
     if (outdoorTemp !== null && outdoorHum !== null) {
         // 위험 이력 매칭
@@ -99,77 +95,29 @@ function getRiskLevel(tempDiff, humidity, outdoorTemp = null, outdoorHum = null)
                 }
             });
         }
-
-        // [핵심 개선] 안전 이력 매칭
-        if (safeData.length > 0) {
-            safeData.forEach(h => {
-                // 1. 실외 데이터 기준 매칭
-                if (h.outTemp !== undefined) {
-                    const hTemp = parseFloat(h.outTemp);
-                    const hHum = parseFloat(h.outHumid);
-                    if (!isNaN(hTemp) && !isNaN(hHum) &&
-                        Math.abs(hTemp - outdoorTemp) <= 1.5 &&
-                        Math.abs(hHum - outdoorHum) <= 7) {
-                        safeMatchCount++;
-                    }
-                }
-                // 2. 내부 데이터 기준 매칭 (실시간 측정 습도와 대조)
-                else if (h.inTemp !== undefined) {
-                    const hHum = parseFloat(h.inHumid);
-                    if (!isNaN(hHum) && Math.abs(hHum - humidity) <= 5) {
-                        safeMatchCount++;
-                    }
-                }
-            });
-        }
     }
 
-    // [개선] 위험 사례와 안전 사례를 비율로 비교하여 판단
     if (dangerMatch && dangerMatchCount > 0) {
-        const totalMatch = dangerMatchCount + safeMatchCount;
-        const dangerRatio = dangerMatchCount / totalMatch;
-
-        if (dangerRatio > 0.6) {
-            // 위험 사례가 60% 초과 → 위험 판정
-            return {
-                label: '위험',
-                class: 'status-danger',
-                reason: `과거 유사 사례 기반 위험 감지 (위험${dangerMatchCount}건/안전${safeMatchCount}건)`
-            };
-        } else if (dangerRatio > 0.3) {
-            // 위험 사례가 30~60% → 주의 판정
-            return {
-                label: '주의',
-                class: 'status-caution',
-                reason: `과거 사례 분석: 주의 필요 (위험${dangerMatchCount}건/안전${safeMatchCount}건)`
-            };
-        }
-        // 위험 사례가 30% 이하이면 이력 매칭 결과는 무시하고 물리 기반 판정으로 진행
-    }
-
-    // [추가] 안전 이력만 있는 경우, 물리적으로 위험 구간이라도 안전 쪽으로 보정
-    let safeBias = 0;
-    if (safeMatchCount > 0 && dangerMatchCount === 0) {
-        safeBias = Math.min(safeMatchCount * 0.5, 2.0); // 안전 이력당 0.5도, 최대 2.0도 보정
+        return {
+            label: '위험',
+            class: 'status-danger',
+            reason: `과거 유사 위험 사례 기반 위험 감지 (유사 위험 이력 ${dangerMatchCount}건)`
+        };
     }
 
     // 2. 물리 기반 판정
     const humidityWeight = humidity > 80 ? 1.0 : 0;
-    const adjustedDiff = tempDiff - humidityWeight + safeBias;
+    const adjustedDiff = tempDiff - humidityWeight;
 
     if (adjustedDiff > 5) return {
         label: '안전',
         class: 'status-safe',
-        reason: safeMatchCount > 0
-            ? `강판 온도 안전 + 과거 안전 사례 ${safeMatchCount}건 확인`
-            : '강판 온도가 이슬점보다 충분히 높아 안전한 상태입니다.'
+        reason: '강판 온도가 이슬점보다 충분히 높아 안전한 상태입니다.'
     };
     if (adjustedDiff > 2) return {
         label: '주의',
         class: 'status-caution',
-        reason: safeMatchCount > 0
-            ? `물리적 주의 구간이나 과거 안전 사례 ${safeMatchCount}건 참고`
-            : '강판 온도와 이슬점 차이가 좁혀지고 있거나 습도가 높습니다. 환기 및 온도 관리를 권장합니다.'
+        reason: '강판 온도와 이슬점 차이가 좁혀지고 있거나 습도가 높습니다. 환기 및 온도 관리를 권장합니다.'
     };
     return {
         label: '위험',
@@ -215,16 +163,76 @@ function renderLocationSummary() {
     }
 
     const html = WAREHOUSE_LOCATIONS.map(loc => {
-        // 1. 당일 리포트 스냅샷이 있으면 우선 사용, 없으면 실시간(latestLocationStatus), 마지막으로 기본값
-        const data = (snapshotData && snapshotData[loc]) || latestLocationStatus[loc] || {
-            steel: '-',
-            dp: '-',
-            riskLabel: '미측정',
-            riskClass: 'status-safe',
-            gate: '닫힘',
-            pack: '포장',
-            product: '양호',
-            time: '-'
+        const rawData = (snapshotData && snapshotData[loc]) || latestLocationStatus[loc] || {};
+
+        let temp = rawData.temp !== undefined && rawData.temp !== '-' ? parseFloat(rawData.temp) : null;
+        let humidity = rawData.humidity !== undefined && rawData.humidity !== '-' ? parseFloat(rawData.humidity) : null;
+        let steel = rawData.steel !== undefined && rawData.steel !== '-' ? parseFloat(rawData.steel) : null;
+
+        let dp = rawData.dp !== undefined && rawData.dp !== '-' ? rawData.dp : '-';
+        let riskLabel = rawData.riskLabel || '미측정';
+        let riskClass = rawData.riskClass || 'status-safe';
+        let time = rawData.time || '-';
+        let gate = rawData.gate || '닫힘';
+        let pack = rawData.pack || '포장';
+        let product = rawData.product || '양호';
+
+        // 실시간 온습도가 있으면 동적 계산 수행
+        if (temp !== null && humidity !== null) {
+            const calculatedDp = parseFloat(calculateDewPoint(temp, humidity));
+            dp = calculatedDp.toFixed(1);
+
+            // 소재 온도가 없으면 내부 온도로 대체하여 계산
+            let targetSteel = steel !== null ? steel : temp;
+            const diff = parseFloat((targetSteel - calculatedDp).toFixed(1));
+
+            // 외기 온습도 찾기 (IoT 1CCL 외부 또는 SSCL 외부 매칭)
+            let outTemp = null;
+            let outHum = null;
+
+            if (loc.includes('1CCL') || loc.includes('2CCL') || loc.includes('3CCL')) {
+                const extData = latestLocationStatus['1CCL 외부'];
+                if (extData && extData.temp !== undefined && extData.temp !== '-') {
+                    outTemp = parseFloat(extData.temp);
+                    outHum = parseFloat(extData.humidity);
+                }
+            } else if (loc.includes('SSCL')) {
+                const extData = latestLocationStatus['SSCL 외부'];
+                if (extData && extData.temp !== undefined && extData.temp !== '-') {
+                    outTemp = parseFloat(extData.temp);
+                    outHum = parseFloat(extData.humidity);
+                }
+            }
+
+            // 실외 실측값이 없을 경우 기상청 실외 날씨 데이터를 폴백으로 사용
+            if (outTemp === null || isNaN(outTemp)) {
+                outTemp = parseFloat(document.getElementById('outdoor-temp-input')?.value);
+                outHum = parseFloat(document.getElementById('outdoor-humidity-input')?.value);
+            }
+
+            const risk = getRiskLevel(diff, humidity, outTemp, outHum);
+            riskLabel = risk.label;
+            riskClass = risk.class;
+
+            // latestLocationStatus[loc]에 계산된 값을 반영 (보고서 저장 시 활용)
+            if (latestLocationStatus[loc]) {
+                latestLocationStatus[loc].dp = dp;
+                latestLocationStatus[loc].riskLabel = riskLabel;
+                latestLocationStatus[loc].riskClass = riskClass;
+            }
+        }
+
+        const data = {
+            temp: temp !== null ? temp : '-',
+            humidity: humidity !== null ? humidity : '-',
+            steel: steel !== null ? steel : '-',
+            dp: dp,
+            riskLabel: riskLabel,
+            riskClass: riskClass,
+            gate: gate,
+            pack: pack,
+            product: product,
+            time: time
         };
 
         const riskBgClass = data.riskClass.replace('status-', 'bg-');
@@ -291,11 +299,20 @@ async function analyzeLocation(loc) {
     const humInput = document.getElementById(`input-hum-${loc}`);
 
     const st = parseFloat(steelInput.value);
-    const it = parseFloat(tempInput.value);
-    const h = parseFloat(humInput.value);
+    let it = parseFloat(tempInput.value);
+    let h = parseFloat(humInput.value);
+
+    // IoT 실시간 데이터 폴백 지원
+    const iotData = latestLocationStatus[loc] || {};
+    if (isNaN(it) && iotData.temp !== undefined && iotData.temp !== '-') {
+        it = parseFloat(iotData.temp);
+    }
+    if (isNaN(h) && iotData.humidity !== undefined && iotData.humidity !== '-') {
+        h = parseFloat(iotData.humidity);
+    }
 
     if (isNaN(st) || isNaN(it) || isNaN(h)) {
-        alert('모든 환경 데이터를 정확히 입력해주세요.');
+        alert('소재온도와 환경 데이터(또는 IoT 데이터)가 필요합니다.');
         return;
     }
 
@@ -326,10 +343,13 @@ async function analyzeLocation(loc) {
 }
 
 // ========== 6. 위치 상태 업데이트 ==========
-function updateLocationStatus(location, steel, dp, risk, gate, pack, product) {
+function updateLocationStatus(location, steel, dp, risk, gate, pack, product, temp = null, humidity = null) {
+    const existing = latestLocationStatus[location] || {};
     latestLocationStatus[location] = {
         steel: steel,
         dp: dp,
+        temp: temp !== null ? temp : (existing.temp || '-'),
+        humidity: humidity !== null ? humidity : (existing.humidity || '-'),
         riskLabel: risk.label,
         riskClass: risk.class,
         gate: gate || '닫힘',
@@ -395,7 +415,7 @@ function toggleLocationStatus(location, field) {
 
     // 3. 데이터 저장
     // 3-1. 실시간 상태 업데이트 (Master)
-    updateLocationStatus(location, currentData.steel, (currentData.dp || currentData.dewPoint), { label: currentData.riskLabel, class: currentData.riskClass }, currentData.gate, currentData.pack, currentData.product);
+    updateLocationStatus(location, currentData.steel, (currentData.dp || currentData.dewPoint), { label: currentData.riskLabel, class: currentData.riskClass }, currentData.gate, currentData.pack, currentData.product, currentData.temp, currentData.humidity);
 
     // 3-2. 만약 스냅샷을 보고 있었다면, 해당 스냅샷(보고서)도 업데이트하여 UI 동기화
     if (isSnapshot && snapshotSlot && typeof firebase !== 'undefined' && firebase.apps.length > 0) {
@@ -489,7 +509,7 @@ function updateUI(location, steelTemp, indoorTemp, humidity, outdoorTemp, outdoo
 
     // 위치 상태 업데이트
     const existing = latestLocationStatus[location] || { gate: '닫힘', pack: '포장', product: '양호' };
-    updateLocationStatus(location, steelTemp, dp, risk, existing.gate, existing.pack, existing.product);
+    updateLocationStatus(location, steelTemp, dp, risk, existing.gate, existing.pack, existing.product, indoorTemp, humidity);
 }
 
 // ========== 9. 로그 관리 ==========
@@ -503,6 +523,8 @@ function saveLog(location, steelTemp, indoorTemp, humidity, outdoorTemp, outdoor
         location: location,
         steel: `${steelTemp}°C`,
         indoor: `${indoorTemp}°C / ${humidity}%`,
+        temp: indoorTemp,
+        humidity: humidity,
         outdoor: `${outdoorTemp}°C / ${outdoorHum}%`,
         outdoorTemp: outdoorTemp,
         outdoorHum: outdoorHum,
@@ -880,9 +902,39 @@ async function submitTimedReport(timeSlot) {
             };
         } else {
             if (targetDate === getLocalDateString()) {
-                snapshot[l] = latestLocationStatus[l] || {
-                    steel: '-', dp: '-', temp: '-', humidity: '-', tempDiff: '-', riskLabel: '미측정', riskClass: 'status-safe',
-                    gate: '닫힘', pack: '포장', product: '양호', time: '-'
+                const raw = latestLocationStatus[l] || {};
+                let temp = raw.temp !== undefined && raw.temp !== '-' ? parseFloat(raw.temp) : null;
+                let humidity = raw.humidity !== undefined && raw.humidity !== '-' ? parseFloat(raw.humidity) : null;
+                let steel = raw.steel !== undefined && raw.steel !== '-' ? parseFloat(raw.steel) : null;
+                let dp = raw.dp !== undefined && raw.dp !== '-' ? raw.dp : '-';
+                let riskLabel = raw.riskLabel || '미측정';
+                let riskClass = raw.riskClass || 'status-safe';
+
+                if (temp !== null && humidity !== null) {
+                    const calculatedDp = parseFloat(calculateDewPoint(temp, humidity));
+                    dp = calculatedDp.toFixed(1);
+                    let targetSteel = steel !== null ? steel : temp;
+                    const diff = parseFloat((targetSteel - calculatedDp).toFixed(1));
+                    
+                    let outTemp = outdoor.temp;
+                    let outHum = outdoor.humidity;
+                    const risk = getRiskLevel(diff, humidity, outTemp, outHum);
+                    riskLabel = risk.label;
+                    riskClass = risk.class;
+                }
+
+                snapshot[l] = {
+                    steel: steel !== null ? steel : '-',
+                    dp: dp,
+                    temp: temp !== null ? temp : '-',
+                    humidity: humidity !== null ? humidity : '-',
+                    tempDiff: steel !== null && dp !== '-' ? (steel - parseFloat(dp)).toFixed(1) : '-',
+                    riskLabel: riskLabel,
+                    riskClass: riskClass,
+                    gate: raw.gate || '닫힘',
+                    pack: raw.pack || '포장',
+                    product: raw.product || '양호',
+                    time: raw.time || '-'
                 };
             } else {
                 snapshot[l] = {
@@ -1197,7 +1249,6 @@ function toggleView(view) {
         if (forecastView) forecastView.classList.add('active');
         if (navForecast) navForecast.classList.add('active');
         updateWeeklyForecast();
-        updateHourlyHumidity(); // 시간별 습도 예보도 업데이트
     } else if (view === 'history') {
         if (historyView) historyView.classList.add('active');
         if (navHistory) navHistory.classList.add('active');
@@ -1372,16 +1423,10 @@ function changeHistoryPage(page) {
  * @param {Array} data - 결로 이력 데이터 배열
  */
 function updateCondensationAnalysis(data) {
-    const safeCountEl = document.getElementById('stat-safe-count');
     const totalCountEl = document.getElementById('stat-total-count');
     const outdoorTempEl = document.getElementById('stat-avg-outdoor-temp');
     const outdoorHumEl = document.getElementById('stat-avg-outdoor-hum');
     const avgDiffEl = document.getElementById('stat-avg-diff');
-
-    // 엑셀 안전 데이터 건수 표시
-    if (safeCountEl) {
-        safeCountEl.textContent = `${excelSafeData.length} 건`;
-    }
 
     if (!totalCountEl || data.length === 0) {
         if (totalCountEl) totalCountEl.textContent = '0 건';
@@ -1411,14 +1456,11 @@ function updateCondensationAnalysis(data) {
 }
 
 /**
- * 알고리즘에서 사용할 수 있도록 결로 이력 데이터를 간단한 배열 형태로 반환합니다.
- * [개선] 결로 발생(위험) 데이터와 결로 미발생(안전) 데이터를 모두 수집하여
- * 균형 잡힌 예측이 가능하도록 합니다.
- * 반환 형태: { danger: [...], safe: [...] }
+ * 알고리즘에서 사용할 수 있도록 결로 실제 발생 이력 데이터만 간단한 배열 형태로 반환합니다.
+ * 반환 형태: { danger: [...] }
  */
 function getCondensationHistoryForAlgorithm() {
     const dangerData = []; // 결로 발생 이력
-    const safeData = [];   // 결로 미발생 이력
 
     // 1. 수동 입력 이력(manual_history)에서 수집 - 결로 발생 건
     if (monitoringLogs) {
@@ -1433,7 +1475,7 @@ function getCondensationHistoryForAlgorithm() {
         });
     }
 
-    // 2. 보고서(reports)에서 수집 - 결로 발생 + 안전 모두 수집
+    // 2. 보고서(reports)에서 수집 - 결로 발생 건만 수집
     if (allReports) {
         Object.keys(allReports).forEach(date => {
             const day = allReports[date];
@@ -1451,9 +1493,6 @@ function getCondensationHistoryForAlgorithm() {
 
                         if (hasCondensation) {
                             dangerData.push({ outTemp, outHumid, risk: '위험' });
-                        } else {
-                            // [핵심 개선] 결로가 발생하지 않은 안전 데이터도 수집
-                            safeData.push({ outTemp, outHumid, risk: '안전' });
                         }
                     }
                 });
@@ -1461,7 +1500,7 @@ function getCondensationHistoryForAlgorithm() {
         });
     }
 
-    // 3. 일반 모니터링 로그에서도 안전/위험 데이터 추가 수집
+    // 3. 일반 모니터링 로그에서도 위험 데이터 추가 수집
     if (monitoringLogs) {
         monitoringLogs.forEach(log => {
             if (log && log.source !== 'manual_history' && log.outdoorTemp !== undefined && log.outdoorHum !== undefined) {
@@ -1474,34 +1513,14 @@ function getCondensationHistoryForAlgorithm() {
 
                 if (log.risk === '위험') {
                     dangerData.push(entry);
-                } else if (log.risk === '안전') {
-                    safeData.push(entry);
                 }
             }
         });
     }
 
-    // 4. 엑셀에서 업로드된 안전 데이터 추가
-    if (excelSafeData && excelSafeData.length > 0) {
-        excelSafeData.forEach(d => {
-            const entry = { risk: '안전', source: 'excel' };
-            if (d.outTemp !== undefined) {
-                entry.outTemp = parseFloat(d.outTemp);
-                entry.outHumid = parseFloat(d.outHumid);
-            } else if (d.inTemp !== undefined) {
-                entry.inTemp = parseFloat(d.inTemp);
-                entry.inHumid = parseFloat(d.inHumid);
-            }
-            safeData.push(entry);
-        });
-    }
-
-    // 하위 호환성을 위해 기존 형태(배열)와 새 형태(객체) 모두 지원
-    // 배열로 접근 시: dangerData만 반환 (기존 동작)
-    // 객체로 접근 시: { danger, safe } 모두 반환
     const result = dangerData;
     result.danger = dangerData;
-    result.safe = safeData;
+    result.safe = []; // 빈 배열 유지 (에러 방지용)
     return result;
 }
 
@@ -1581,13 +1600,6 @@ function setupEventListeners() {
         }
     };
 
-    // 시간별 습도 날짜 선택 이벤트
-    const hourlyDateInput = document.getElementById('hourly-forecast-date');
-    if (hourlyDateInput) {
-        hourlyDateInput.addEventListener('change', (e) => {
-            updateHourlyHumidity(e.target.value);
-        });
-    }
 }
 
 // ========== 15. 초기화 ==========
@@ -1598,10 +1610,6 @@ function init() {
     const todayStr = getLocalDateString();
     if (elements.reportDate) {
         elements.reportDate.value = todayStr;
-    }
-    const hourlyDateInput = document.getElementById('hourly-forecast-date');
-    if (hourlyDateInput) {
-        hourlyDateInput.value = todayStr;
     }
 
     // 시계 업데이트
@@ -2396,274 +2404,6 @@ function updateManagementGuide(forecast) {
     }
 }
 
-/**
- * 당일 및 향후 며칠간의 시간별 습도 예보를 가져와 Firebase에 병합 저장합니다.
- * 기상청 단기예보 API에서 REH(습도) 데이터를 추출합니다.
- */
-async function fetchHourlyHumidityForecast(targetDateStr = null) {
-    const API_KEY = kmaShortApiKey;
-    const nx = 56, ny = 92;
-    const todayStr = getLocalDateString().replace(/-/g, '');
-    const dateToSearch = targetDateStr ? targetDateStr.replace(/-/g, '') : todayStr;
-    const isToday = (dateToSearch === todayStr);
-
-    // 1. Firebase에서 해당 날짜의 기존 데이터 로드 (실측 데이터 병합 및 폴백용)
-    let existingData = [];
-    if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
-        try {
-            const pathDate = targetDateStr || getLocalDateString();
-            const snap = await firebase.database().ref(`hourlyForecasts/${pathDate}`).once('value').catch(err => {
-                // 읽기 권한이 없는 경우 조용히 넘어감
-                return null;
-            });
-            if (snap) {
-                const val = snap.val();
-                if (val && val.data) {
-                    existingData = val.data;
-                    if (existingData.length >= 24 && (!isToday || (Date.now() - (val.updatedAt || 0) < 3600000))) {
-                        console.log(`✅ [저장소] ${pathDate} 데이터를 사용합니다.`);
-                        return existingData;
-                    }
-                }
-            }
-        } catch (e) {
-            // 에러 무시
-        }
-    }
-
-    // 2. 오늘이거나 데이터가 부족한 경우 API 호출 시도
-    // 단, 과거 날짜(어제 이전)는 기상청 단기예보가 제공되지 않으므로 API 호출을 건너뜁니다.
-    if (API_KEY && API_KEY.length >= 10 && (isToday || (existingData.length < 5 && targetDateStr >= todayStr.substring(0, 4) + '-' + todayStr.substring(4, 6) + '-' + todayStr.substring(6, 8)))) {
-        try {
-            const now = new Date();
-            const baseTimes = [23, 20, 17, 14, 11, 8, 5, 2];
-            let fcstBaseTime = 2, fcstBaseDate = todayStr;
-
-            if (now.getHours() < 2 || (now.getHours() === 2 && now.getMinutes() < 15)) {
-                const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
-                fcstBaseDate = getLocalDateString(yesterday).replace(/-/g, '');
-                fcstBaseTime = 23;
-            } else {
-                for (const t of baseTimes) {
-                    if (now.getHours() > t || (now.getHours() === t && now.getMinutes() > 15)) {
-                        fcstBaseTime = t; break;
-                    }
-                }
-            }
-
-            const encodedShortKey = encodeURIComponent(API_KEY);
-            const baseUrl = 'https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst';
-            const getParams = (bt) => `dataType=JSON&base_date=${fcstBaseDate}&base_time=${bt}&nx=${nx}&ny=${ny}&numOfRows=1000`;
-
-            console.log(`🌐 시간별 습도 API 호출 시도 (${fcstBaseDate}, ${fcstBaseTime}시 기준)...`);
-            const fcstRes = await fetchWithBaseTimeSearch(baseUrl, getParams, fcstBaseTime, encodedShortKey);
-
-            if (fcstRes?.response?.header?.resultCode === '00') {
-                const items = fcstRes.response.body.items.item.filter(i => i.category === 'REH');
-
-                // 날짜별로 데이터 분류
-                const apiDataByDate = {};
-                items.forEach(item => {
-                    if (!apiDataByDate[item.fcstDate]) apiDataByDate[item.fcstDate] = [];
-                    apiDataByDate[item.fcstDate].push({
-                        time: item.fcstTime.substring(0, 2) + ':' + item.fcstTime.substring(2),
-                        humidity: parseInt(item.fcstValue)
-                    });
-                });
-
-                const targetHours = [
-                    '00:00', '01:00', '02:00', '03:00', '04:00', '05:00',
-                    '06:00', '07:00', '08:00', '09:00', '10:00', '11:00',
-                    '12:00', '13:00', '14:00', '15:00', '16:00', '17:00',
-                    '18:00', '19:00', '20:00', '21:00', '22:00', '23:00'
-                ];
-
-                // 현재 요청한 날짜 및 API 응답 날짜들에 대해 병합 처리
-                let requestedResult = null;
-
-                for (const dateRaw of Object.keys(apiDataByDate)) {
-                    const formattedDate = `${dateRaw.substring(0, 4)}-${dateRaw.substring(4, 6)}-${dateRaw.substring(6, 8)}`;
-                    const apiData = apiDataByDate[dateRaw];
-
-                    // 해당 날짜의 기존 데이터를 Firebase에서 확인
-                    let baseDataForMerge = [];
-                    if (formattedDate === (targetDateStr || getLocalDateString())) {
-                        baseDataForMerge = existingData;
-                    } else if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
-                        try {
-                            const dateSnap = await firebase.database().ref(`hourlyForecasts/${formattedDate}`).once('value').catch(() => null);
-                            const dateVal = dateSnap ? dateSnap.val() : null;
-                            if (dateVal && dateVal.data) baseDataForMerge = dateVal.data;
-                        } catch (e) {
-                            // 권한 부족 등의 사유로 로드 실패 시 무시
-                        }
-                    }
-
-                    const mergedData = targetHours.map(hourStr => {
-                        const existingMatch = baseDataForMerge.find(d => d.time === hourStr);
-                        const apiMatch = apiData.find(d => d.time === hourStr);
-
-                        // 1. 실측 데이터가 있으면 무조건 보존
-                        if (existingMatch && existingMatch.isObserved) return existingMatch;
-                        // 2. 새로운 API 예보 데이터가 있으면 업데이트 (미래 시간)
-                        if (apiMatch) return apiMatch;
-                        // 3. 기존 데이터(과거 예보 등)가 있다면 유지
-                        return existingMatch || null;
-                    }).filter(d => d !== null);
-
-                    // 현재 조회 중인 날짜인 경우 결과에 담기
-                    if (dateRaw === dateToSearch) {
-                        requestedResult = mergedData;
-                    }
-
-                    // 저장은 관리자 권한이 있고 동절기(11월~3월)인 경우만 수행
-                    const month = parseInt(dateRaw.substring(4, 6));
-                    const isWinter = (month >= 11 || month <= 3);
-                    if (isAdmin && isWinter && typeof firebase !== 'undefined' && firebase.apps.length > 0) {
-                        try {
-                            await firebase.database().ref(`hourlyForecasts/${formattedDate}`).update({
-                                data: mergedData,
-                                updatedAt: Date.now(),
-                                isWinter: true
-                            });
-                        } catch (saveErr) {
-                            console.warn('📝 읽기 전용 모드: 데이터를 서버에 저장하지 않았습니다.');
-                        }
-                    }
-                }
-
-                if (requestedResult) return requestedResult;
-            }
-        } catch (e) {
-            console.error('시간별 습도 API 처리 실패:', e);
-        }
-    }
-
-    // 3. 최종적으로 데이터가 있으면 반환, 없으면 null
-    return (existingData && existingData.length > 0) ? existingData : null;
-}
-
-/**
- * Firebase에서 과거 시간별 습도 데이터를 불러옵니다.
- */
-async function loadHistoricalHourlyHumidity(dateStr) {
-    if (typeof firebase === 'undefined' || firebase.apps.length === 0) return null;
-
-    try {
-        const snapshot = await firebase.database().ref(`hourlyForecasts/${dateStr}`).once('value');
-        const val = snapshot.val();
-        if (val && val.data) {
-            console.log(`📦 Firebase에서 과거 습도 데이터 로드 완료 (${dateStr})`);
-            return val.data;
-        }
-    } catch (e) {
-        console.error('Firebase 과거 데이터 로드 에러:', e);
-    }
-    return null;
-}
-
-/**
- * 시간별 습도 예보를 화면에 표시합니다.
- */
-function displayHourlyHumidity(data, targetDateStr = null) {
-    const grid = document.getElementById('hourly-humidity-grid');
-    const updateTimeEl = document.getElementById('hourly-update-time');
-    const dateInput = document.getElementById('hourly-forecast-date');
-    if (!grid) return;
-
-    const todayStr = getLocalDateString();
-    const isToday = !targetDateStr || targetDateStr === todayStr;
-
-    if (updateTimeEl) {
-        if (isToday) {
-            const nowStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-            updateTimeEl.textContent = `(실시간 예보: ${nowStr})`;
-        } else {
-            updateTimeEl.textContent = `(${targetDateStr} 기록)`;
-        }
-    }
-
-    if (dateInput && !dateInput.value) {
-        dateInput.value = targetDateStr || todayStr;
-    }
-
-    if (!data || data.length === 0) {
-        grid.innerHTML = `<div class="hourly-no-data">${isToday ? '시간별 습도 데이터를 가져오지 못했습니다.' : '해당 날짜의 저장된 기록이 없습니다.'}</div>`;
-        return;
-    }
-
-    const now = new Date();
-    const currentHour = now.getHours();
-
-    // 오전(00:00~11:00)과 오후(12:00~23:00)로 분리
-    const amData = data.filter(item => parseInt(item.time.split(':')[0]) < 12);
-    const pmData = data.filter(item => parseInt(item.time.split(':')[0]) >= 12);
-
-    const renderItems = (items) => {
-        if (items.length === 0) return '<div class="hourly-no-data" style="grid-column: span 12;">해당 시간대 데이터가 없습니다.</div>';
-
-        return items.map(item => {
-            const hour = parseInt(item.time.split(':')[0]);
-            // 오늘인 경우에만 과거 시간 회색 처리 및 현재 시간 표시
-            const isPast = isToday && hour < currentHour;
-            const isCurrent = isToday && hour === currentHour;
-
-            // 습도 수준에 따른 클래스 결정
-            let humClass = '';
-            if (item.humidity >= 85) humClass = 'hum-danger';
-            else if (item.humidity >= 75) humClass = 'hum-high';
-            else if (item.humidity >= 65) humClass = 'hum-medium';
-            else humClass = 'hum-low';
-
-            const currentStyle = isCurrent ? 'border: 2px solid var(--seah-blue); box-shadow: 0 0 15px rgba(0,94,184,0.4); background: rgba(255,255,255,0.9); z-index: 2;' : '';
-            const pastStyle = isPast ? 'opacity: 0.4; pointer-events: none;' : '';
-
-            const observedTag = item.isObserved ? '<span class="obs-tag">● 실측</span>' : '';
-
-            return `
-                <div class="hourly-humidity-item ${humClass}" style="${currentStyle}${pastStyle}" title="${item.time} 습도: ${item.humidity}% ${item.isObserved ? '(실측 데이터)' : '(기상청 예보)'}">
-                    <span class="hourly-time">${item.time.substring(0, 2)}시</span>
-                    <span class="hourly-value">${item.humidity}%</span>
-                    ${observedTag}
-                </div>
-            `;
-        }).join('');
-    };
-
-    grid.innerHTML = `
-        <div class="hourly-section">
-            <div class="hourly-section-label">🌅 AM <span>오전 ${isToday ? '예보' : '기록'}</span></div>
-            <div class="hourly-section-items">${renderItems(amData)}</div>
-        </div>
-        <div class="hourly-section">
-            <div class="hourly-section-label">🌇 PM <span>오후 ${isToday ? '예보' : '기록'}</span></div>
-            <div class="hourly-section-items">${renderItems(pmData)}</div>
-        </div>
-    `;
-}
-
-/**
- * 주간 예측 화면에서 시간별 습도 예보를 업데이트합니다.
- */
-async function updateHourlyHumidity(targetDate = null) {
-    const todayStr = getLocalDateString();
-    const dateToLoad = targetDate || todayStr;
-    const grid = document.getElementById('hourly-humidity-grid');
-
-    // UI 로딩 표시 (그리드가 있을 때만)
-    if (grid) {
-        grid.innerHTML = '<div class="hourly-loading">데이터를 불러오는 중...</div>';
-    }
-
-    // 1. 데이터 가져오기 및 저장 (이 함수 내부에서 Firebase 저장을 수행함)
-    const data = await fetchHourlyHumidityForecast(dateToLoad);
-
-    // 2. UI 업데이트 (그리드가 있을 때만)
-    if (grid) {
-        displayHourlyHumidity(data, dateToLoad);
-    }
-}
-
 
 // 페이지 로드 시 초기화
 if (document.readyState === 'loading') {
@@ -3037,7 +2777,6 @@ function updateCurrentTime() {
 }
 
 // 고도화된 결로 예측 알고리즘 (빅데이터 분석 및 Sudden Warming 반영)
-// [개선] 결로 미발생(안전) 이력도 함께 분석하여 균형 잡힌 판단 수행
 function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb, humidity, prevMinTemp, historyData = []) {
     const maxRainProb = Math.max(amRainProb, pmRainProb);
     const currentTempDiff = Number((maxTemp - minTemp).toFixed(1));
@@ -3065,15 +2804,11 @@ function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb,
         }
     }
 
-    // [빅데이터 매칭] 과거 발생 이력과 현재 예보 데이터 비교
-    // [개선] 위험 이력과 안전 이력을 구분하여 분석
+    // [빅데이터 매칭] 과거 발생 이력과 현재 예보 데이터 비교 (위험 이력만 매칭)
     let dangerMatchCount = 0;
-    let safeMatchCount = 0;
     let firstDangerMatch = null;
 
-    // historyData가 새로운 형식(danger/safe 분리) 또는 기존 형식(배열)인지 확인
     const dangerHistory = historyData.danger || historyData || [];
-    const safeHistory = historyData.safe || [];
 
     if (dangerHistory.length > 0) {
         dangerHistory.forEach(h => {
@@ -3088,35 +2823,8 @@ function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb,
         });
     }
 
-    // [핵심 개선] 안전 이력 매칭
-    if (safeHistory.length > 0) {
-        safeHistory.forEach(h => {
-            // 주간 예보에서는 주로 실외 기온(maxTemp)과 습도(currentAvgHum/KMA)를 기준으로 매칭
-            if (h.outTemp !== undefined) {
-                const hTemp = parseFloat(h.outTemp);
-                const hHum = parseFloat(h.outHumid);
-                if (!isNaN(hTemp) && !isNaN(hHum) &&
-                    Math.abs(hTemp - maxTemp) <= 1.5 &&
-                    Math.abs(hHum - currentAvgHum) <= 7) {
-                    safeMatchCount++;
-                }
-            }
-            // 내부 데이터만 있는 경우, 예보 습도와 유사한 안전 이력이 있는지 참고
-            else if (h.inTemp !== undefined) {
-                const hHum = parseFloat(h.inHumid);
-                if (!isNaN(hHum) && Math.abs(hHum - currentAvgHum) <= 5) {
-                    safeMatchCount++;
-                }
-            }
-        });
-    }
-
-    // [개선] 이력 기반 위험도 결정 (위험/안전 비율 분석)
-    const totalMatch = dangerMatchCount + safeMatchCount;
-    const dangerRatio = totalMatch > 0 ? (dangerMatchCount / totalMatch) : 0;
-    const hasStrongDangerHistory = (dangerMatchCount > 0 && dangerRatio > 0.6);
-    const hasWeakDangerHistory = (dangerMatchCount > 0 && dangerRatio > 0.3 && dangerRatio <= 0.6);
-    const hasSafeHistory = (safeMatchCount > 0 && dangerMatchCount === 0);
+    // 이력 기반 위험도 결정
+    const hasStrongDangerHistory = (dangerMatchCount > 0);
 
     // 1. 위험 (Danger) 판정 기준
     const isSuddenWarmingDanger = (tempJump >= 10 && currentAvgHum >= 65);
@@ -3124,258 +2832,47 @@ function determineFanHeaterOperationV2(minTemp, maxTemp, amRainProb, pmRainProb,
     const isExtremeHumid = (currentAvgHum >= 85 && maxTemp > 0);
     const isDeepFreeze = (maxTemp <= 3);
 
-    // [개선] 안전 이력이 충분히 있는 경우, 물리적 위험 판정 기준을 완화
     const physicalDanger = isSuddenWarmingDanger || isExtremeDiff || isExtremeHumid;
     const historyDanger = hasStrongDangerHistory;
 
-    // 안전 이력이 있으면 물리적 위험만으로는 '주의'로 완화 가능
     if ((physicalDanger || historyDanger) && !isDeepFreeze) {
-        if (hasSafeHistory && !physicalDanger) {
-            // 이력상 위험이지만 안전 사례만 있고 물리적 위험 요소 없음 → 주의로 완화
-            status.risk = '주의';
-            status.fan = true;
-            status.heater = false;
-            status.reason = `과거 안전 사례 ${safeMatchCount}건 확인, 모니터링 권장`;
-        } else if (hasWeakDangerHistory && !physicalDanger) {
-            // 위험/안전 비율이 비등한 경우 → 주의
-            status.risk = '주의';
-            status.fan = true;
-            status.heater = false;
-            status.reason = `과거 사례 혼재 (위험${dangerMatchCount}/안전${safeMatchCount}건), 배풍기 가동 권장`;
+        status.risk = '위험';
+        status.fan = true;
+        status.heater = (tempJump >= 8 && currentAvgHum >= 80);
+
+        if (historyDanger) {
+            status.reason = `과거 유사 위험 사례 기반 위험 감지 (유사 위험 이력 ${dangerMatchCount}건)`;
+        } else if (isSuddenWarmingDanger) {
+            status.reason = `급격한 기온 상승(${tempJump}℃↑) 위험`;
+        } else if (isExtremeDiff) {
+            status.reason = `극심한 일교차(${currentTempDiff}℃↑) 위험`;
         } else {
-            status.risk = '위험';
-            status.fan = true;
-            status.heater = (tempJump >= 8 && currentAvgHum >= 80);
-
-            if (historyDanger) {
-                status.reason = `과거 유사 사례 기반 위험 감지 (위험${dangerMatchCount}건/안전${safeMatchCount}건)`;
-            } else if (isSuddenWarmingDanger) {
-                status.reason = `급격한 기온 상승(${tempJump}℃↑) 위험`;
-            } else if (isExtremeDiff) {
-                status.reason = `극심한 일교차(${currentTempDiff}℃↑) 위험`;
-            } else {
-                status.reason = `초고습(${currentAvgHum}%↑) 환경 위험`;
-            }
-
-            // 안전 사례가 있으면 reason에 참고 정보 추가
-            if (safeMatchCount > 0) {
-                status.reason += ` (※ 유사 조건 안전 ${safeMatchCount}건 참고)`;
-            }
+            status.reason = `초고습(${currentAvgHum}%↑) 환경 위험`;
         }
     }
     // 2. 주의 (Caution) 판정 기준
     else if (currentTempDiff >= 8 || currentAvgHum >= 80 || tempJump >= 8 || isDeepFreeze && maxRainProb >= 60) {
-        // [개선] 안전 이력이 많으면 주의 → 안전으로 완화 가능
-        if (hasSafeHistory && safeMatchCount >= 3 && currentAvgHum < 80) {
+        status.risk = '주의';
+        status.fan = true;
+
+        const isHeaterNeed = (tempJump >= 8 && currentAvgHum >= 80);
+        status.heater = isHeaterNeed;
+
+        if (isDeepFreeze && maxRainProb >= 60) status.reason = `한파 중 강수 예보 (고습도 주의)`;
+        else if (tempJump >= 8 && currentAvgHum >= 80) status.reason = `기온 급변 및 고습도 복합 주의 (열풍기 권장)`;
+        else if (tempJump >= 8) status.reason = `기온 상승 추세(${tempJump}℃↑) 주의`;
+        else if (currentAvgHum >= 80) status.reason = `습도 증가(${currentAvgHum}%↑) 주의`;
+        else status.reason = `일교차(${currentTempDiff}℃) 주의 구간`;
+
+        if (isDeepFreeze && currentAvgHum < 75 && maxRainProb < 50) {
             status.risk = '안전';
             status.fan = false;
             status.heater = false;
-            status.reason = `과거 안전 사례 ${safeMatchCount}건 확인, 현재 조건 안전`;
-        } else {
-            status.risk = '주의';
-            status.fan = true;
-
-            const isHeaterNeed = (tempJump >= 8 && currentAvgHum >= 80);
-            status.heater = isHeaterNeed;
-
-            if (isDeepFreeze && maxRainProb >= 60) status.reason = `한파 중 강수 예보 (고습도 주의)`;
-            else if (tempJump >= 8 && currentAvgHum >= 80) status.reason = `기온 급변 및 고습도 복합 주의 (열풍기 권장)`;
-            else if (tempJump >= 8) status.reason = `기온 상승 추세(${tempJump}℃↑) 주의`;
-            else if (currentAvgHum >= 80) status.reason = `습도 증가(${currentAvgHum}%↑) 주의`;
-            else status.reason = `일교차(${currentTempDiff}℃) 주의 구간`;
-
-            // 안전 사례가 있으면 참고 정보 추가
-            if (safeMatchCount > 0) {
-                status.reason += ` (※ 유사 조건 안전 ${safeMatchCount}건 참고)`;
-            }
-
-            if (isDeepFreeze && currentAvgHum < 75 && maxRainProb < 50) {
-                status.risk = '안전';
-                status.fan = false;
-                status.heater = false;
-                status.reason = '지속 한파 (안전)';
-            }
+            status.reason = '지속 한파 (안전)';
         }
-    } else if (hasSafeHistory) {
-        // [추가] 물리적으로 안전하면서 안전 이력도 있는 경우, 신뢰도 표시
-        status.reason = `정상 범위 (과거 안전 사례 ${safeMatchCount}건 확인)`;
     }
 
     return status;
-}
-
-// ========== 19. 엑셀 데이터 분석 및 업로드 (Excel Integration) ==========
-async function handleExcelUpload(event) {
-    const files = event.target.files;
-    if (!files || files.length === 0) return;
-
-    if (!isAdmin) {
-        alert('관리자만 데이터를 업로드할 수 있습니다.');
-        return;
-    }
-
-    const uploadBtn = document.querySelector('button[onclick*="excel-upload-input"]');
-    const originalText = uploadBtn ? uploadBtn.textContent : '📂 엑셀 데이터 업로드';
-    if (uploadBtn) {
-        uploadBtn.textContent = `⏳ ${files.length}개 파일 처리 중...`;
-        uploadBtn.disabled = true;
-    }
-
-    let allExtractedData = [];
-    const processFile = (file) => {
-        return new Promise((resolve, reject) => {
-            if (typeof XLSX === 'undefined') {
-                reject(new Error('Excel 라이브러리(XLSX)를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.'));
-                return;
-            }
-            console.log('Processing file:', file.name);
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                try {
-                    const data = new Uint8Array(e.target.result);
-                    const workbook = XLSX.read(data, { type: 'array' });
-                    workbook.SheetNames.forEach(sheetName => {
-                        const sheet = workbook.Sheets[sheetName];
-                        const jsonData = XLSX.utils.sheet_to_json(sheet);
-                        if (jsonData.length === 0) return;
-                        const headers = Object.keys(jsonData[0]);
-                        const patterns = [
-                            { t: /1CCL.*외부.*온도/, h: /1CCL.*외부.*습도/, type: 'out' },
-                            { t: /SSCL.*외부.*온도/, h: /SSCL.*외부.*습도/, type: 'out' },
-                            { t: /1CCL.*내부.*온도/, h: /1CCL.*내부.*습도/, type: 'in' },
-                            { t: /2CCL.*내부.*온도/, h: /2CCL.*내부.*습도/, type: 'in' },
-                            { t: /3CCL.*내부.*온도/, h: /3CCL.*내부.*습도/, type: 'in' },
-                            { t: /외부.*온도/, h: /외부.*습도/, type: 'out' },
-                            { t: /내부.*온도/, h: /내부.*습도/, type: 'in' }
-                        ];
-                        // 최적화: 시트당 한 번만 컬럼 인덱스 찾기
-                        const patternKeys = patterns.map(p => ({
-                            tKey: headers.find(h => p.t.test(h)),
-                            hKey: headers.find(h => p.h.test(h)),
-                            type: p.type
-                        })).filter(pk => pk.tKey && pk.hKey);
-
-                        if (patternKeys.length === 0) {
-                            console.warn('Matching columns not found in sheet:', sheetName);
-                            return;
-                        }
-
-                        // 중복 체크용 기존 데이터 키 생성 (Set 사용으로 속도 개선)
-                        const existingKeys = new Set(excelSafeData.map(item => {
-                            const itemTemp = item.outTemp !== undefined ? item.outTemp : item.inTemp;
-                            const itemHum = item.outHumid !== undefined ? item.outHumid : item.inHumid;
-                            const itemType = item.outTemp !== undefined ? 'out' : 'in';
-                            return `${item.dateTime}_${itemTemp}_${itemHum}_${itemType}`;
-                        }));
-                        const currentSessionKeys = new Set(allExtractedData.map(item => {
-                            const itemTemp = item.outTemp !== undefined ? item.outTemp : item.inTemp;
-                            const itemHum = item.outHumid !== undefined ? item.outHumid : item.inHumid;
-                            const itemType = item.outTemp !== undefined ? 'out' : 'in';
-                            return `${item.dateTime}_${itemTemp}_${itemHum}_${itemType}`;
-                        }));
-
-                        jsonData.forEach(row => {
-                            patternKeys.forEach(pk => {
-                                const valT = parseFloat(row[pk.tKey]);
-                                const valH = parseFloat(row[pk.hKey]);
-                                if (!isNaN(valT) && !isNaN(valH)) {
-                                    const dateTime = row['DateTime'] || row['일시'] || row['Date'] || '-';
-                                    const recordKey = `${dateTime}_${valT}_${valH}_${pk.type}`;
-
-                                    if (!existingKeys.has(recordKey) && !currentSessionKeys.has(recordKey)) {
-                                        allExtractedData.push({
-                                            timestamp: Date.now(),
-                                            dateTime: dateTime,
-                                            fileName: file.name,
-                                            [pk.type === 'out' ? 'outTemp' : 'inTemp']: valT,
-                                            [pk.type === 'out' ? 'outHumid' : 'inHumid']: valH
-                                        });
-                                        currentSessionKeys.add(recordKey);
-                                    }
-                                }
-                            });
-                        });
-                    });
-                    resolve();
-                } catch (err) { reject(err); }
-            };
-            reader.onerror = reject;
-            reader.readAsArrayBuffer(file);
-        });
-    };
-
-    try {
-        console.log('Starting file processing for', files.length, 'files');
-        try {
-            await Promise.all(Array.from(files).map(async f => {
-                try {
-                    await processFile(f);
-                } catch (fileErr) {
-                    throw new Error(`파일 처리 중 오류 (${f.name}): ${fileErr.message || fileErr}`);
-                }
-            }));
-        } catch (procErr) {
-            throw procErr;
-        }
-        console.log('Extraction complete. Total items:', allExtractedData.length);
-
-        if (allExtractedData.length === 0) {
-            alert('업로드할 새로운 데이터가 없습니다. (전부 중복이거나 유효하지 않음)');
-            if (uploadBtn) {
-                uploadBtn.textContent = originalText;
-                uploadBtn.disabled = false;
-            }
-            return;
-        }
-
-        if (confirm(`${files.length}개 파일에서 신규 데이터 ${allExtractedData.length}건을 추출했습니다.\n(중복된 데이터는 자동으로 필터링되었습니다.)\n\n학습시키겠습니까?`)) {
-            if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
-
-                const dbRef = firebase.database().ref('excelSafeData');
-                const chunkSize = 500;
-                for (let i = 0; i < allExtractedData.length; i += chunkSize) {
-                    try {
-                        const chunk = allExtractedData.slice(i, i + chunkSize);
-                        const updates = {};
-                        chunk.forEach(item => { updates[dbRef.push().key] = item; });
-                        await dbRef.update(updates);
-                        if (uploadBtn) uploadBtn.textContent = `⏳ 업로드 (${Math.round((i / allExtractedData.length) * 100)}%)`;
-                    } catch (uploadErr) {
-                        if (uploadErr.message.includes('PERMISSION_DENIED')) {
-                            console.warn('Firebase 권한 부족. 로컬 스토리지로 전환합니다.');
-                            throw { code: 'PERMISSION_DENIED', originalError: uploadErr };
-                        }
-                        throw new Error(`Firebase 업로드 중 오류 (Chunk ${i / chunkSize + 1}): ${uploadErr.message}`);
-                    }
-                }
-                alert('업로드 완료 (Firebase)');
-            } else {
-                saveToLocal();
-            }
-        }
-    } catch (err) {
-        if (err.code === 'PERMISSION_DENIED') {
-            if (confirm('Firebase 서버에 저장할 권한이 없습니다.\n대신 이 브라우저(로컬)에 저장하여 학습에 반영할까요?')) {
-                saveToLocal();
-            }
-        } else {
-            console.error('handleExcelUpload error:', err);
-            alert('처리 중 오류 발생: ' + (err.message || err));
-        }
-    } finally {
-
-        function saveToLocal() {
-            excelSafeData = excelSafeData.concat(allExtractedData);
-            localStorage.setItem('seah_excel_safe_data', JSON.stringify(excelSafeData));
-            alert(`${allExtractedData.length}건의 데이터를 로컬에 저장했습니다.\n(※ 서버 권한 문제로 인해 본인 브라우저에만 반영됩니다.)`);
-            updateCondensationHistory();
-        }
-        if (uploadBtn) {
-            uploadBtn.textContent = originalText;
-            uploadBtn.disabled = false;
-        }
-        event.target.value = '';
-    }
 }
 
 // ========== 20. 초기화 및 실시간 데이터 바인딩 ==========
@@ -3386,14 +2883,5 @@ if (typeof firebase !== 'undefined' && firebase.apps.length > 0) {
         if (currentSettings.kma_short_api_key) kmaShortApiKey = currentSettings.kma_short_api_key;
         if (currentSettings.kma_mid_api_key) kmaMidApiKey = currentSettings.kma_mid_api_key;
         console.log('Firebase settings synchronized.');
-    });
-
-    // 결로 이력 데이터 실시간 수신
-    firebase.database().ref('excelSafeData').on('value', (snapshot) => {
-        const data = snapshot.val();
-        if (data) {
-            excelSafeData = Object.keys(data).map(key => ({ ...data[key], fbKey: key }));
-            updateCondensationHistory();
-        }
     });
 }

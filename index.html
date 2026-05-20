@@ -363,19 +363,6 @@
                 <!-- JS에서 7일간의 예측 카드를 생성합니다 -->
             </div>
 
-            <!-- 당일 시간별 습도 예보 -->
-            <div class="hourly-humidity-card card mt-md">
-                <div class="card-header-flex"
-                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                    <h4>💧 시간별 습도 예보 <span id="hourly-update-time"></span></h4>
-                    <input type="date" id="hourly-forecast-date" class="status-date-input" style="width: auto;">
-                </div>
-                <p class="text-muted" style="margin-bottom: 12px; font-size: 0.85rem;">기상청 단기예보 기준 (1시간 단위)</p>
-                <div id="hourly-humidity-grid" class="hourly-humidity-grid">
-                    <div class="hourly-loading">데이터를 불러오는 중...</div>
-                </div>
-            </div>
-
 
             <div class="ai-guide-card card mt-md" style="border-left: 5px solid var(--seah-blue);">
                 <h4>🤖 AI 결로 예측 점수 안내</h4>
@@ -436,24 +423,15 @@
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <h2>🚨 결로 발생 분석 및 이력</h2>
                         <div class="admin-only" style="display: flex; gap: 10px;">
-                            <button onclick="document.getElementById('excel-upload-input').click()" class="btn-nav"
-                                style="background: #34a853; color: white;">📂 엑셀 데이터 업로드</button>
-                            <input type="file" id="excel-upload-input" style="display: none;" multiple accept="*/*"
-                                onchange="handleExcelUpload(event)">
                             <button onclick="openPastRecordModal()" class="btn-nav"
                                 style="background: var(--seah-orange); color: white;">➕ 과거 이력 등록</button>
                         </div>
                     </div>
-                    <p class="text-muted">축적된 과거 결로 발생 데이터를 토대로 주간 예보의 정확도를 높입니다. (엑셀 업로드는 자동 '안전' 데이터로 분류됩니다.)</p>
+                    <p class="text-muted">축적된 과거 결로 발생 데이터를 토대로 주간 예보의 정확도를 높입니다.</p>
                 </div>
 
                 <!-- 결로 분석 상단 카드 -->
                 <div class="analysis-stats-container mt-md">
-                    <div class="stat-card stat-green">
-                        <span class="stat-label">학습용 안전 데이터</span>
-                        <strong id="stat-safe-count" class="stat-value-mini">0 건</strong>
-                        <span class="stat-sub-label">엑셀 업로드 등 안전 사례 (학습용)</span>
-                    </div>
                     <div class="stat-card stat-blue">
                         <span class="stat-label">총 발생(위험) 횟수</span>
                         <strong id="stat-total-count" class="stat-value-mini">0 건</strong>
