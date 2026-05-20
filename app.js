@@ -1627,7 +1627,6 @@ function init() {
     // 초기 날씨 및 예보 데이터 로드
     updateWeatherData();
     updateWeeklyForecast();
-    updateHourlyHumidity();
 
     // 시간대별 초기값 설정
     if (elements.reportTime) {
